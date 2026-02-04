@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: ads-transparency-scanner
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
+        value: false
+      - key: NODE_ENV
+        value: production
