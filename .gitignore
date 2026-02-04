@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Test/debug files
+*.html
+!index.html
+*.json
+!package.json
+!package-lock.json
+*.png
+nul
+
+# Claude Code
+.claude/
+
+# Environment
+.env

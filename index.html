@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ads Transparency Scanner</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 2rem;
+      padding-bottom: 1.5rem;
+      border-bottom: 1px solid #334155;
+    }
+
+    h1 {
+      font-size: 1.75rem;
+      font-weight: 600;
+      color: #f8fafc;
+      margin-bottom: 0.5rem;
+    }
+
+    .subtitle {
+      color: #94a3b8;
+      font-size: 0.9rem;
+    }
+
+    /* Navigation */
+    .nav-tabs {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .nav-tab {
+      padding: 0.75rem 1.5rem;
+      background: #1e293b;
+      border: none;
+      border-radius: 8px 8px 0 0;
+      color: #94a3b8;
+      font-size: 0.9rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .nav-tab:hover {
+      background: #334155;
+      color: #e2e8f0;
+    }
+
+    .nav-tab.active {
+      background: #3b82f6;
+      color: white;
+    }
+
+    .page {
+      display: none;
+    }
+
+    .page.active {
+      display: block;
+    }
+
+    /* Panels */
+    .panel {
+      background: #1e293b;
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+
+    .panel-title {
+      font-weight: 600;
+      font-size: 1rem;
+      color: #f8fafc;
+    }
+
+    /* Form elements */
+    .form-group {
+      margin-bottom: 1.5rem;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 0.875rem;
+      color: #94a3b8;
+      margin-bottom: 0.5rem;
+    }
+
+    input[type="text"], input[type="url"] {
+      width: 100%;
+      padding: 0.875rem 1rem;
+      font-size: 1rem;
+      border: 2px solid #334155;
+      border-radius: 8px;
+      background: #0f172a;
+      color: #f8fafc;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    input[type="text"]:focus, input[type="url"]:focus {
+      border-color: #3b82f6;
+    }
+
+    input::placeholder {
+      color: #64748b;
+    }
+
+    .btn {
+      padding: 0.875rem 2rem;
+      font-size: 1rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .btn-primary {
+      background: #3b82f6;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #2563eb;
+    }
+
+    .btn-primary:disabled {
+      background: #475569;
+      cursor: not-allowed;
+    }
+
+    .btn-secondary {
+      background: #334155;
+      color: #e2e8f0;
+    }
+
+    .btn-secondary:hover {
+      background: #475569;
+    }
+
+    .btn-success {
+      background: #22c55e;
+      color: white;
+    }
+
+    .btn-success:hover {
+      background: #16a34a;
+    }
+
+    .btn-lg {
+      padding: 1.25rem 3rem;
+      font-size: 1.25rem;
+    }
+
+    /* Status */
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.875rem;
+      color: #94a3b8;
+      margin-top: 1rem;
+    }
+
+    .status.loading {
+      color: #fbbf24;
+    }
+
+    .status.success {
+      color: #22c55e;
+    }
+
+    .status.error {
+      color: #ef4444;
+    }
+
+    .spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid transparent;
+      border-top-color: currentColor;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Progress bar */
+    .progress-container {
+      margin: 1rem 0;
+    }
+
+    .progress-bar {
+      height: 8px;
+      background: #334155;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: #3b82f6;
+      border-radius: 4px;
+      transition: width 0.3s ease;
+    }
+
+    .progress-text {
+      font-size: 0.75rem;
+      color: #94a3b8;
+      margin-top: 0.5rem;
+    }
+
+    /* Results table */
+    .results-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .results-table th,
+    .results-table td {
+      padding: 1rem;
+      text-align: left;
+      border-bottom: 1px solid #334155;
+    }
+
+    .results-table th {
+      background: #334155;
+      font-weight: 600;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #94a3b8;
+    }
+
+    .results-table tr:hover {
+      background: #334155;
+    }
+
+    .results-table .domain {
+      font-weight: 600;
+      color: #f8fafc;
+    }
+
+    .results-table .publisher {
+      color: #3b82f6;
+      font-weight: 500;
+    }
+
+    .results-table .ads-count {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #22c55e;
+    }
+
+    .results-table .ads-count.zero {
+      color: #64748b;
+    }
+
+    .results-table .timestamp {
+      font-size: 0.8rem;
+      color: #64748b;
+    }
+
+    .results-table .status-cell {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .status-badge {
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .status-badge.success {
+      background: #166534;
+      color: #bbf7d0;
+    }
+
+    .status-badge.error {
+      background: #7f1d1d;
+      color: #fecaca;
+    }
+
+    .status-badge.pending {
+      background: #854d0e;
+      color: #fef08a;
+    }
+
+    .status-badge.scanning {
+      background: #1e40af;
+      color: #bfdbfe;
+    }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 3rem;
+      color: #64748b;
+    }
+
+    .empty-state-icon {
+      font-size: 3rem;
+      margin-bottom: 1rem;
+      opacity: 0.5;
+    }
+
+    /* Settings saved message */
+    .save-message {
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      margin-top: 1rem;
+      display: none;
+    }
+
+    .save-message.success {
+      background: #166534;
+      color: #bbf7d0;
+      display: block;
+    }
+
+    .save-message.error {
+      background: #7f1d1d;
+      color: #fecaca;
+      display: block;
+    }
+
+    /* Start section */
+    .start-section {
+      text-align: center;
+      padding: 2rem;
+    }
+
+    .start-section p {
+      color: #94a3b8;
+      margin-bottom: 1.5rem;
+    }
+
+    .config-warning {
+      background: #7f1d1d;
+      color: #fecaca;
+      padding: 1rem;
+      border-radius: 8px;
+      margin-bottom: 1.5rem;
+    }
+
+    .config-warning a {
+      color: #fecaca;
+      text-decoration: underline;
+    }
+
+    /* Summary stats */
+    .summary-stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .stat-card {
+      background: #0f172a;
+      padding: 1.25rem;
+      border-radius: 8px;
+      text-align: center;
+    }
+
+    .stat-card .label {
+      font-size: 0.75rem;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.5rem;
+    }
+
+    .stat-card .value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #f8fafc;
+    }
+
+    .stat-card .value.highlight {
+      color: #3b82f6;
+    }
+
+    @media (max-width: 768px) {
+      .summary-stats {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Ads Transparency Scanner</h1>
+      <p class="subtitle">Scan domains for Google Ads transparency data</p>
+    </header>
+
+    <div class="nav-tabs">
+      <button class="nav-tab active" onclick="showPage('main')">Scanner</button>
+      <button class="nav-tab" onclick="showPage('settings')">Settings</button>
+    </div>
+
+    <!-- Main Scanner Page -->
+    <div id="mainPage" class="page active">
+      <div class="panel">
+        <div class="start-section">
+          <div id="configWarning" class="config-warning" style="display: none;">
+            Apps Script URL not configured. <a href="#" onclick="showPage('settings')">Go to Settings</a> to set it up.
+          </div>
+          <p id="domainCount">Configure Apps Script URL in Settings to load domains</p>
+          <button class="btn btn-success btn-lg" id="startBtn" onclick="startBatchScan()" disabled>
+            START
+          </button>
+          <div class="status" id="status"></div>
+          <div class="progress-container" id="progressContainer" style="display: none;">
+            <div class="progress-bar">
+              <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+            </div>
+            <div class="progress-text" id="progressText">0 / 0 domains scanned</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" id="resultsPanel" style="display: none;">
+        <div class="panel-header">
+          <span class="panel-title">Scan Results</span>
+          <button class="btn btn-secondary" onclick="clearResults()">Clear</button>
+        </div>
+
+        <div class="summary-stats" id="summaryStats">
+          <div class="stat-card">
+            <div class="label">Total Domains</div>
+            <div class="value" id="statDomains">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="label">Total Ads</div>
+            <div class="value highlight" id="statTotalAds">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="label">With Ads</div>
+            <div class="value" id="statWithAds">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="label">Scan Time</div>
+            <div class="value" id="statScanTime">-</div>
+          </div>
+        </div>
+
+        <table class="results-table">
+          <thead>
+            <tr>
+              <th>Domain</th>
+              <th>Publisher Name</th>
+              <th>Total Ads</th>
+              <th>Scanned At</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="resultsBody">
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Settings Page -->
+    <div id="settingsPage" class="page">
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Apps Script Configuration</span>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Apps Script Web App URL</label>
+          <input type="url" id="appsScriptUrl" placeholder="https://script.google.com/macros/s/xxxxx/exec" />
+        </div>
+
+        <p style="color: #64748b; font-size: 0.85rem; margin-bottom: 1.5rem;">
+          Enter the deployed Web App URL from your Google Apps Script.
+          See <code>apps-script.js</code> for setup instructions.
+        </p>
+
+        <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
+        <button class="btn btn-secondary" onclick="testConnection()" style="margin-left: 0.5rem;">Test Connection</button>
+
+        <div class="save-message" id="saveMessage"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Setup Instructions</span>
+        </div>
+        <ol style="color: #94a3b8; line-height: 2; padding-left: 1.5rem;">
+          <li>Open your Google Sheet</li>
+          <li>Create a sheet tab named <strong>CONFIG</strong></li>
+          <li>Add domains in column A (one per row, starting from row 2)</li>
+          <li>Go to <strong>Extensions > Apps Script</strong></li>
+          <li>Copy the code from <code>apps-script.js</code> and paste it</li>
+          <li>Click <strong>Deploy > New deployment</strong></li>
+          <li>Select type: <strong>Web app</strong></li>
+          <li>Set "Execute as": <strong>Me</strong></li>
+          <li>Set "Who has access": <strong>Anyone</strong></li>
+          <li>Click <strong>Deploy</strong> and copy the Web App URL</li>
+          <li>Paste the URL above and click <strong>Save Settings</strong></li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // State
+    let settings = JSON.parse(localStorage.getItem('adsSettings') || '{}');
+    let scanResults = [];
+    let isScanning = false;
+
+    // Format date in Israeli timezone with timezone indicator
+    function formatIsraeliDate(date) {
+      const options = {
+        timeZone: 'Asia/Jerusalem',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      };
+      const formatted = date.toLocaleString('he-IL', options);
+
+      // Determine if it's IST (winter) or IDT (summer)
+      const jan = new Date(date.getFullYear(), 0, 1).getTimezoneOffset();
+      const jul = new Date(date.getFullYear(), 6, 1).getTimezoneOffset();
+      const israelOffset = date.toLocaleString('en-US', { timeZone: 'Asia/Jerusalem', timeZoneName: 'short' });
+      const tzMatch = israelOffset.match(/([A-Z]{2,4})$/);
+      const tz = tzMatch ? tzMatch[1] : 'IST';
+
+      return `${formatted} (${tz})`;
+    }
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', () => {
+      loadSettings();
+      checkConfiguration();
+    });
+
+    // Navigation
+    function showPage(page) {
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+
+      document.getElementById(page + 'Page').classList.add('active');
+      event.target.classList.add('active');
+    }
+
+    // Settings
+    function loadSettings() {
+      if (settings.appsScriptUrl) {
+        document.getElementById('appsScriptUrl').value = settings.appsScriptUrl;
+      }
+    }
+
+    function saveSettings() {
+      const url = document.getElementById('appsScriptUrl').value.trim();
+
+      if (!url) {
+        showSaveMessage('Please enter a valid URL', 'error');
+        return;
+      }
+
+      settings.appsScriptUrl = url;
+      localStorage.setItem('adsSettings', JSON.stringify(settings));
+
+      showSaveMessage('Settings saved successfully!', 'success');
+      checkConfiguration();
+    }
+
+    function showSaveMessage(message, type) {
+      const el = document.getElementById('saveMessage');
+      el.textContent = message;
+      el.className = 'save-message ' + type;
+
+      setTimeout(() => {
+        el.className = 'save-message';
+      }, 3000);
+    }
+
+    async function testConnection() {
+      const url = document.getElementById('appsScriptUrl').value.trim();
+
+      if (!url) {
+        showSaveMessage('Please enter a URL first', 'error');
+        return;
+      }
+
+      showSaveMessage('Testing connection...', 'success');
+
+      try {
+        // Use proxy to avoid CORS
+        const proxyUrl = `/proxy?url=${encodeURIComponent(url + '?action=health')}`;
+        const response = await fetch(proxyUrl);
+        const data = await response.json();
+
+        if (data.status === 'ok') {
+          showSaveMessage('Connection successful!', 'success');
+        } else {
+          showSaveMessage('Connection failed: ' + (data.error || 'Unknown error'), 'error');
+        }
+      } catch (error) {
+        showSaveMessage('Connection failed: ' + error.message, 'error');
+      }
+    }
+
+    // Configuration check
+    async function checkConfiguration() {
+      const warning = document.getElementById('configWarning');
+      const btn = document.getElementById('startBtn');
+      const countEl = document.getElementById('domainCount');
+
+      if (!settings.appsScriptUrl) {
+        warning.style.display = 'block';
+        btn.disabled = true;
+        countEl.textContent = 'Configure Apps Script URL in Settings to load domains';
+        return;
+      }
+
+      warning.style.display = 'none';
+      countEl.textContent = 'Loading domains...';
+
+      try {
+        // Use proxy to avoid CORS
+        const proxyUrl = `/proxy?url=${encodeURIComponent(settings.appsScriptUrl + '?action=getDomains')}`;
+        const response = await fetch(proxyUrl);
+        const data = await response.json();
+
+        if (data.success && data.domains) {
+          // Clean domains: remove https://, http://, www. and trailing slashes
+          settings.domains = data.domains.map(d =>
+            d.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/+$/, '')
+          );
+          countEl.textContent = `${settings.domains.length} domains loaded from Google Sheet`;
+          btn.disabled = settings.domains.length === 0;
+        } else {
+          countEl.textContent = 'Error: ' + (data.error || 'Failed to load domains');
+          btn.disabled = true;
+        }
+      } catch (error) {
+        countEl.textContent = 'Error loading domains: ' + error.message;
+        btn.disabled = true;
+      }
+    }
+
+    // Scanning
+    function setStatus(message, type = '') {
+      const status = document.getElementById('status');
+      status.className = 'status ' + type;
+      status.innerHTML = type === 'loading'
+        ? `<div class="spinner"></div><span>${message}</span>`
+        : `<span>${message}</span>`;
+    }
+
+    function updateProgress(current, total) {
+      const container = document.getElementById('progressContainer');
+      const fill = document.getElementById('progressFill');
+      const text = document.getElementById('progressText');
+
+      container.style.display = 'block';
+      const percent = total > 0 ? (current / total) * 100 : 0;
+      fill.style.width = percent + '%';
+      text.textContent = `${current} / ${total} domains scanned`;
+    }
+
+    async function startBatchScan() {
+      if (isScanning || !settings.domains || settings.domains.length === 0) return;
+
+      isScanning = true;
+      scanResults = [];
+      const startTime = new Date();
+
+      const btn = document.getElementById('startBtn');
+      btn.disabled = true;
+
+      document.getElementById('resultsPanel').style.display = 'block';
+      document.getElementById('resultsBody').innerHTML = '';
+
+      // Initialize table with pending status for all domains
+      settings.domains.forEach(domain => {
+        addResultRow({
+          domain: domain,
+          publisherName: '-',
+          totalAds: '-',
+          scannedAt: '-',
+          status: 'pending'
+        });
+      });
+
+      setStatus('Starting batch scan...', 'loading');
+
+      for (let i = 0; i < settings.domains.length; i++) {
+        const domain = settings.domains[i];
+
+        updateProgress(i, settings.domains.length);
+        setStatus(`Scanning ${domain}...`, 'loading');
+
+        // Update row to scanning status
+        updateResultRow(domain, { status: 'scanning' });
+
+        try {
+          const response = await fetch(`/scrape?domain=${encodeURIComponent(domain)}`);
+          const result = await response.json();
+
+          if (result.success && result.data) {
+            const data = result.data;
+            const rowData = {
+              domain: domain,
+              publisherName: data.advertiser?.name || '-',
+              totalAds: data.totalAds || 0,
+              scannedAt: formatIsraeliDate(new Date()),
+              status: 'success'
+            };
+
+            scanResults.push(rowData);
+            updateResultRow(domain, rowData);
+          } else {
+            const rowData = {
+              domain: domain,
+              publisherName: '-',
+              totalAds: 0,
+              scannedAt: formatIsraeliDate(new Date()),
+              status: 'error',
+              error: result.error
+            };
+
+            scanResults.push(rowData);
+            updateResultRow(domain, rowData);
+          }
+        } catch (error) {
+          const rowData = {
+            domain: domain,
+            publisherName: '-',
+            totalAds: 0,
+            scannedAt: formatIsraeliDate(new Date()),
+            status: 'error',
+            error: error.message
+          };
+
+          scanResults.push(rowData);
+          updateResultRow(domain, rowData);
+        }
+
+        // Small delay between requests
+        if (i < settings.domains.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+
+      updateProgress(settings.domains.length, settings.domains.length);
+
+      const endTime = new Date();
+      const duration = Math.round((endTime - startTime) / 1000);
+
+      updateSummaryStats(duration);
+      setStatus(`Scan completed in ${duration} seconds. Sending to Sheets...`, 'loading');
+
+      // Automatically send results to Google Sheets
+      await sendToSheets();
+
+      btn.disabled = false;
+      isScanning = false;
+    }
+
+    function addResultRow(data) {
+      const tbody = document.getElementById('resultsBody');
+      const tr = document.createElement('tr');
+      tr.id = 'row-' + data.domain.replace(/\./g, '-');
+      tr.innerHTML = getRowHtml(data);
+      tbody.appendChild(tr);
+    }
+
+    function updateResultRow(domain, data) {
+      const rowId = 'row-' + domain.replace(/\./g, '-');
+      const tr = document.getElementById(rowId);
+      if (tr) {
+        tr.innerHTML = getRowHtml({ ...data, domain });
+      }
+    }
+
+    function getRowHtml(data) {
+      const adsClass = data.totalAds === 0 || data.totalAds === '-' ? 'zero' : '';
+      const statusClass = data.status;
+      const statusText = data.status === 'scanning' ? 'Scanning...' :
+                         data.status === 'pending' ? 'Pending' :
+                         data.status === 'success' ? 'Done' : 'Error';
+
+      return `
+        <td class="domain">${data.domain}</td>
+        <td class="publisher">${data.publisherName}</td>
+        <td class="ads-count ${adsClass}">${data.totalAds}</td>
+        <td class="timestamp">${data.scannedAt}</td>
+        <td>
+          <span class="status-badge ${statusClass}">${statusText}</span>
+          ${data.error ? `<span style="color: #ef4444; font-size: 0.75rem; display: block; margin-top: 0.25rem;">${data.error}</span>` : ''}
+        </td>
+      `;
+    }
+
+    function updateSummaryStats(duration) {
+      const totalDomains = scanResults.length;
+      const totalAds = scanResults.reduce((sum, r) => sum + (parseInt(r.totalAds) || 0), 0);
+      const withAds = scanResults.filter(r => r.totalAds > 0).length;
+
+      document.getElementById('statDomains').textContent = totalDomains;
+      document.getElementById('statTotalAds').textContent = totalAds.toLocaleString();
+      document.getElementById('statWithAds').textContent = withAds;
+      document.getElementById('statScanTime').textContent = duration + 's';
+    }
+
+    function clearResults() {
+      scanResults = [];
+      document.getElementById('resultsBody').innerHTML = '';
+      document.getElementById('resultsPanel').style.display = 'none';
+      document.getElementById('progressContainer').style.display = 'none';
+      setStatus('');
+    }
+
+    async function sendToSheets() {
+      if (!scanResults || scanResults.length === 0) {
+        setStatus('No results to send to Sheets', 'error');
+        return;
+      }
+
+      if (!settings.appsScriptUrl) {
+        setStatus('Scan complete. Apps Script not configured - results not sent to Sheets.', 'success');
+        return;
+      }
+
+      try {
+        const proxyUrl = `/proxy?url=${encodeURIComponent(settings.appsScriptUrl)}`;
+        const response = await fetch(proxyUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            action: 'saveResults',
+            results: scanResults.map(r => ({
+              domain: r.domain,
+              publisherName: r.publisherName,
+              totalAds: r.totalAds,
+              scanDate: r.scannedAt,
+              status: r.status
+            }))
+          })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          setStatus(`Scan complete! ${data.savedCount} results saved to RESULTS sheet.`, 'success');
+        } else {
+          setStatus('Scan complete. Failed to save to Sheets: ' + (data.error || 'Unknown error'), 'error');
+        }
+      } catch (error) {
+        setStatus('Scan complete. Failed to save to Sheets: ' + error.message, 'error');
+      }
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "ads-transparency-proxy",
+  "version": "1.0.0",
+  "description": "Proxy service to scrape Google Ads Transparency Center",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "puppeteer": "^22.0.0"
+  }
+}
