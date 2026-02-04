@@ -113,6 +113,22 @@
       margin-bottom: 0.5rem;
     }
 
+    input[type="number"] {
+      width: 100px;
+      padding: 0.875rem 1rem;
+      font-size: 1rem;
+      border: 2px solid #334155;
+      border-radius: 8px;
+      background: #0f172a;
+      color: #f8fafc;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    input[type="number"]:focus {
+      border-color: #3b82f6;
+    }
+
     input[type="text"], input[type="url"] {
       width: 100%;
       padding: 0.875rem 1rem;
@@ -423,6 +439,112 @@
         grid-template-columns: repeat(2, 1fr);
       }
     }
+
+    /* Auto-run styles */
+    .auto-run-container {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .checkbox-wrapper {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      cursor: pointer;
+    }
+
+    .checkbox-wrapper input[type="checkbox"] {
+      width: 20px;
+      height: 20px;
+      accent-color: #3b82f6;
+      cursor: pointer;
+    }
+
+    .checkbox-wrapper label {
+      font-size: 0.95rem;
+      color: #e2e8f0;
+      cursor: pointer;
+    }
+
+    .interval-input {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .interval-input span {
+      color: #94a3b8;
+      font-size: 0.9rem;
+    }
+
+    .auto-run-status {
+      margin-top: 1rem;
+      padding: 1rem;
+      background: #0f172a;
+      border-radius: 8px;
+      font-size: 0.9rem;
+    }
+
+    .auto-run-status .status-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.5rem 0;
+      border-bottom: 1px solid #334155;
+    }
+
+    .auto-run-status .status-row:last-child {
+      border-bottom: none;
+    }
+
+    .auto-run-status .status-label {
+      color: #94a3b8;
+    }
+
+    .auto-run-status .status-value {
+      color: #f8fafc;
+      font-weight: 500;
+    }
+
+    .auto-run-status .status-value.active {
+      color: #22c55e;
+    }
+
+    .auto-run-status .status-value.inactive {
+      color: #64748b;
+    }
+
+    .auto-run-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      background: #166534;
+      color: #bbf7d0;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      margin-left: 1rem;
+    }
+
+    .auto-run-indicator.inactive {
+      background: #334155;
+      color: #94a3b8;
+    }
+
+    .pulse-dot {
+      width: 8px;
+      height: 8px;
+      background: #22c55e;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
   </style>
 </head>
 <body>
@@ -445,6 +567,10 @@
             Apps Script URL not configured. <a href="#" onclick="showPage('settings')">Go to Settings</a> to set it up.
           </div>
           <p id="domainCount">Configure Apps Script URL in Settings to load domains</p>
+          <div id="autoRunIndicator" class="auto-run-indicator inactive" style="display: none;">
+            <div class="pulse-dot"></div>
+            <span>Auto-Run Active</span>
+          </div>
           <button class="btn btn-success btn-lg" id="startBtn" onclick="startBatchScan()" disabled>
             START
           </button>
@@ -524,6 +650,48 @@
 
       <div class="panel">
         <div class="panel-header">
+          <span class="panel-title">Auto-Run Scheduler</span>
+        </div>
+
+        <p style="color: #94a3b8; font-size: 0.85rem; margin-bottom: 1.5rem;">
+          Enable automatic scanning at regular intervals. The scanner will run on the server even if you close this browser tab.
+        </p>
+
+        <div class="auto-run-container">
+          <div class="checkbox-wrapper">
+            <input type="checkbox" id="autoRunEnabled" onchange="toggleAutoRun()">
+            <label for="autoRunEnabled">Enable Auto-Run</label>
+          </div>
+
+          <div class="interval-input">
+            <span>Run every</span>
+            <input type="number" id="autoRunInterval" value="60" min="1" max="1440">
+            <span>minutes</span>
+          </div>
+        </div>
+
+        <div class="auto-run-status" id="autoRunStatus">
+          <div class="status-row">
+            <span class="status-label">Status</span>
+            <span class="status-value inactive" id="autoRunStatusValue">Disabled</span>
+          </div>
+          <div class="status-row">
+            <span class="status-label">Last Run</span>
+            <span class="status-value" id="autoRunLastRun">Never</span>
+          </div>
+          <div class="status-row">
+            <span class="status-label">Next Run</span>
+            <span class="status-value" id="autoRunNextRun">-</span>
+          </div>
+          <div class="status-row">
+            <span class="status-label">Domains</span>
+            <span class="status-value" id="autoRunDomains">0</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">
           <span class="panel-title">Setup Instructions</span>
         </div>
         <ol style="color: #94a3b8; line-height: 2; padding-left: 1.5rem;">
@@ -577,6 +745,9 @@
     document.addEventListener('DOMContentLoaded', () => {
       loadSettings();
       checkConfiguration();
+      checkAutoRunStatus();
+      // Poll auto-run status every 30 seconds
+      setInterval(checkAutoRunStatus, 30000);
     });
 
     // Navigation
@@ -897,6 +1068,111 @@
         }
       } catch (error) {
         setStatus('Scan complete. Failed to save to Sheets: ' + error.message, 'error');
+      }
+    }
+
+    // Auto-Run Functions
+    async function checkAutoRunStatus() {
+      try {
+        const response = await fetch('/auto-run/status');
+        const data = await response.json();
+
+        updateAutoRunUI(data);
+      } catch (error) {
+        console.error('Failed to check auto-run status:', error);
+      }
+    }
+
+    function updateAutoRunUI(data) {
+      const checkbox = document.getElementById('autoRunEnabled');
+      const intervalInput = document.getElementById('autoRunInterval');
+      const statusValue = document.getElementById('autoRunStatusValue');
+      const lastRun = document.getElementById('autoRunLastRun');
+      const nextRun = document.getElementById('autoRunNextRun');
+      const domainsCount = document.getElementById('autoRunDomains');
+      const indicator = document.getElementById('autoRunIndicator');
+
+      checkbox.checked = data.enabled;
+      if (data.intervalMinutes) {
+        intervalInput.value = data.intervalMinutes;
+      }
+
+      if (data.enabled) {
+        statusValue.textContent = data.isRunning ? 'Running...' : 'Active';
+        statusValue.className = 'status-value active';
+        indicator.style.display = 'inline-flex';
+        indicator.className = 'auto-run-indicator';
+      } else {
+        statusValue.textContent = 'Disabled';
+        statusValue.className = 'status-value inactive';
+        indicator.style.display = 'none';
+        indicator.className = 'auto-run-indicator inactive';
+      }
+
+      lastRun.textContent = data.lastRunTime
+        ? formatIsraeliDate(new Date(data.lastRunTime))
+        : 'Never';
+
+      nextRun.textContent = data.nextRunTime
+        ? formatIsraeliDate(new Date(data.nextRunTime))
+        : '-';
+
+      domainsCount.textContent = data.domainsCount || 0;
+    }
+
+    async function toggleAutoRun() {
+      const checkbox = document.getElementById('autoRunEnabled');
+      const intervalInput = document.getElementById('autoRunInterval');
+
+      if (checkbox.checked) {
+        // Start auto-run
+        if (!settings.domains || settings.domains.length === 0) {
+          alert('Please configure and load domains first');
+          checkbox.checked = false;
+          return;
+        }
+
+        const intervalMinutes = parseInt(intervalInput.value) || 60;
+
+        if (intervalMinutes < 1) {
+          alert('Interval must be at least 1 minute');
+          checkbox.checked = false;
+          return;
+        }
+
+        try {
+          const response = await fetch('/auto-run/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              intervalMinutes: intervalMinutes,
+              appsScriptUrl: settings.appsScriptUrl,
+              domains: settings.domains
+            })
+          });
+
+          const data = await response.json();
+
+          if (data.success) {
+            showSaveMessage(`Auto-run started! Running every ${intervalMinutes} minutes.`, 'success');
+            checkAutoRunStatus();
+          } else {
+            alert('Failed to start auto-run: ' + data.error);
+            checkbox.checked = false;
+          }
+        } catch (error) {
+          alert('Failed to start auto-run: ' + error.message);
+          checkbox.checked = false;
+        }
+      } else {
+        // Stop auto-run
+        try {
+          await fetch('/auto-run/stop', { method: 'POST' });
+          showSaveMessage('Auto-run stopped.', 'success');
+          checkAutoRunStatus();
+        } catch (error) {
+          console.error('Failed to stop auto-run:', error);
+        }
       }
     }
   </script>
