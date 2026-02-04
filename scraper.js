@@ -1,12 +1,4 @@
-const puppeteer = require('puppeteer-core');
-let chromium;
-
-// Try to load @sparticuz/chromium for serverless environments
-try {
-  chromium = require('@sparticuz/chromium');
-} catch (e) {
-  chromium = null;
-}
+const puppeteer = require('puppeteer');
 
 /**
  * Scrape Google Ads Transparency Center for a given domain
@@ -21,33 +13,13 @@ async function scrapeAdTransparency(domain, options = {}) {
 
   let browser;
   try {
-    // Determine executable path
-    let executablePath;
-    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-      executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
-    } else if (chromium) {
-      executablePath = await chromium.executablePath();
-    } else {
-      // Local development - try common Chrome paths
-      const possiblePaths = [
-        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-        '/usr/bin/google-chrome',
-        '/usr/bin/chromium-browser'
-      ];
-      const fs = require('fs');
-      executablePath = possiblePaths.find(p => fs.existsSync(p));
-    }
-
     browser = await puppeteer.launch({
-      headless: chromium ? chromium.headless : 'new',
-      executablePath: executablePath,
-      args: chromium ? chromium.args : [
+      headless: 'new',
+      args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--single-process'
+        '--disable-gpu'
       ]
     });
 
