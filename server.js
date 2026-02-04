@@ -13,7 +13,7 @@ const PORT = process.env.PORT || 3000;
 // Auto-run scheduler state
 let autoRunState = {
   enabled: false,
-  intervalMinutes: 60,
+  intervalMinutes: 1,
   isRunning: false,
   lastRunTime: null,
   nextRunTime: null,
@@ -22,6 +22,28 @@ let autoRunState = {
   appsScriptUrl: null,
   domains: []
 };
+
+// Format date in Israeli timezone with timezone indicator (same as frontend)
+function formatIsraeliDate(date) {
+  const options = {
+    timeZone: 'Asia/Jerusalem',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  };
+  const formatted = date.toLocaleString('he-IL', options);
+
+  // Determine if it's IST (winter) or IDT (summer)
+  const israelOffset = date.toLocaleString('en-US', { timeZone: 'Asia/Jerusalem', timeZoneName: 'short' });
+  const tzMatch = israelOffset.match(/([A-Z]{2,4})$/);
+  const tz = tzMatch ? tzMatch[1] : 'IST';
+
+  return `${formatted} (${tz})`;
+}
 
 // Middleware
 app.use(express.json());
@@ -234,7 +256,7 @@ async function runScheduledScan() {
           domain,
           publisherName: result.data.advertiser?.name || '-',
           totalAds: result.data.totalAds || 0,
-          scanDate: new Date().toISOString(),
+          scanDate: formatIsraeliDate(new Date()),
           status: 'success'
         });
       } else {
@@ -242,7 +264,7 @@ async function runScheduledScan() {
           domain,
           publisherName: '-',
           totalAds: 0,
-          scanDate: new Date().toISOString(),
+          scanDate: formatIsraeliDate(new Date()),
           status: 'error',
           error: result.error
         });
@@ -252,7 +274,7 @@ async function runScheduledScan() {
         domain,
         publisherName: '-',
         totalAds: 0,
-        scanDate: new Date().toISOString(),
+        scanDate: formatIsraeliDate(new Date()),
         status: 'error',
         error: error.message
       });
@@ -289,6 +311,7 @@ async function runScheduledScan() {
 
   autoRunState.isRunning = false;
   updateNextRunTime();
+  scheduleNextRun();
 }
 
 function updateNextRunTime() {
@@ -301,6 +324,24 @@ function updateNextRunTime() {
   }
 }
 
+function scheduleNextRun() {
+  if (!autoRunState.enabled) {
+    return;
+  }
+
+  // Clear any existing scheduled task
+  if (autoRunState.scheduledTask) {
+    clearTimeout(autoRunState.scheduledTask);
+    autoRunState.scheduledTask = null;
+  }
+
+  const intervalMs = autoRunState.intervalMinutes * 60 * 1000;
+
+  autoRunState.scheduledTask = setTimeout(() => {
+    runScheduledScan();
+  }, intervalMs);
+}
+
 function startAutoRun() {
   stopAutoRun(); // Clear any existing
 
@@ -309,16 +350,8 @@ function startAutoRun() {
   }
 
   autoRunState.enabled = true;
-  updateNextRunTime();
 
-  // Use setInterval for minute-based scheduling
-  const intervalMs = autoRunState.intervalMinutes * 60 * 1000;
-
-  autoRunState.scheduledTask = setInterval(() => {
-    runScheduledScan();
-  }, intervalMs);
-
-  console.log(`[Auto-Run] Scheduler started. Running every ${autoRunState.intervalMinutes} minutes.`);
+  console.log(`[Auto-Run] Scheduler started. Running every ${autoRunState.intervalMinutes} minutes (after each scan completes).`);
 
   // Run immediately on start
   runScheduledScan();
@@ -328,7 +361,7 @@ function startAutoRun() {
 
 function stopAutoRun() {
   if (autoRunState.scheduledTask) {
-    clearInterval(autoRunState.scheduledTask);
+    clearTimeout(autoRunState.scheduledTask);
     autoRunState.scheduledTask = null;
   }
   autoRunState.enabled = false;

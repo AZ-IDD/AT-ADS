@@ -515,35 +515,86 @@
       color: #64748b;
     }
 
-    .auto-run-indicator {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      padding: 0.5rem 1rem;
-      background: #166534;
-      color: #bbf7d0;
-      border-radius: 6px;
-      font-size: 0.85rem;
-      font-weight: 500;
-      margin-left: 1rem;
+    .auto-run-indicator-panel {
+      background: linear-gradient(135deg, #1e3a2f 0%, #14532d 100%);
+      border: 1px solid #22c55e40;
+      border-radius: 12px;
+      padding: 1rem 1.5rem;
+      margin: 1rem auto;
+      max-width: 400px;
+      text-align: left;
     }
 
-    .auto-run-indicator.inactive {
-      background: #334155;
+    .auto-run-indicator-panel.running {
+      background: linear-gradient(135deg, #1e3a5f 0%, #1e40af 100%);
+      border-color: #3b82f640;
+    }
+
+    .auto-run-header {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 1px solid #22c55e30;
+    }
+
+    .auto-run-indicator-panel.running .auto-run-header {
+      border-bottom-color: #3b82f630;
+    }
+
+    .auto-run-title {
+      color: #4ade80;
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+
+    .auto-run-indicator-panel.running .auto-run-title {
+      color: #60a5fa;
+    }
+
+    .auto-run-details {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem 1rem;
+    }
+
+    .auto-run-detail {
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+    }
+
+    .detail-label {
       color: #94a3b8;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .detail-value {
+      color: #e2e8f0;
+      font-size: 0.85rem;
+      font-weight: 500;
     }
 
     .pulse-dot {
-      width: 8px;
-      height: 8px;
+      width: 10px;
+      height: 10px;
       background: #22c55e;
       border-radius: 50%;
       animation: pulse 2s infinite;
+      box-shadow: 0 0 8px #22c55e80;
+    }
+
+    .auto-run-indicator-panel.running .pulse-dot {
+      background: #3b82f6;
+      box-shadow: 0 0 8px #3b82f680;
     }
 
     @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(0.9); }
     }
   </style>
 </head>
@@ -567,9 +618,29 @@
             Apps Script URL not configured. <a href="#" onclick="showPage('settings')">Go to Settings</a> to set it up.
           </div>
           <p id="domainCount">Configure Apps Script URL in Settings to load domains</p>
-          <div id="autoRunIndicator" class="auto-run-indicator inactive" style="display: none;">
-            <div class="pulse-dot"></div>
-            <span>Auto-Run Active</span>
+          <div id="autoRunIndicator" class="auto-run-indicator-panel" style="display: none;">
+            <div class="auto-run-header">
+              <div class="pulse-dot"></div>
+              <span class="auto-run-title" id="autoRunTitle">Auto-Run Active</span>
+            </div>
+            <div class="auto-run-details">
+              <div class="auto-run-detail">
+                <span class="detail-label">Interval</span>
+                <span class="detail-value" id="autoRunIntervalDisplay">1 min</span>
+              </div>
+              <div class="auto-run-detail">
+                <span class="detail-label">Domains</span>
+                <span class="detail-value" id="autoRunDomainsDisplay">0</span>
+              </div>
+              <div class="auto-run-detail">
+                <span class="detail-label">Last Run</span>
+                <span class="detail-value" id="autoRunLastRunDisplay">Never</span>
+              </div>
+              <div class="auto-run-detail">
+                <span class="detail-label">Next Run</span>
+                <span class="detail-value" id="autoRunNextRunDisplay">-</span>
+              </div>
+            </div>
           </div>
           <button class="btn btn-success btn-lg" id="startBtn" onclick="startBatchScan()" disabled>
             START
@@ -665,7 +736,7 @@
 
           <div class="interval-input">
             <span>Run every</span>
-            <input type="number" id="autoRunInterval" value="60" min="1" max="1440">
+            <input type="number" id="autoRunInterval" value="1" min="1" max="1440">
             <span>minutes</span>
           </div>
         </div>
@@ -1097,16 +1168,40 @@
         intervalInput.value = data.intervalMinutes;
       }
 
+      // Update home page indicator
+      const titleEl = document.getElementById('autoRunTitle');
+      const intervalDisplay = document.getElementById('autoRunIntervalDisplay');
+      const domainsDisplay = document.getElementById('autoRunDomainsDisplay');
+      const lastRunDisplay = document.getElementById('autoRunLastRunDisplay');
+      const nextRunDisplay = document.getElementById('autoRunNextRunDisplay');
+
       if (data.enabled) {
         statusValue.textContent = data.isRunning ? 'Running...' : 'Active';
         statusValue.className = 'status-value active';
-        indicator.style.display = 'inline-flex';
-        indicator.className = 'auto-run-indicator';
+        indicator.style.display = 'block';
+
+        if (data.isRunning) {
+          indicator.className = 'auto-run-indicator-panel running';
+          titleEl.textContent = 'Scanning in Progress...';
+        } else {
+          indicator.className = 'auto-run-indicator-panel';
+          titleEl.textContent = 'Auto-Run Active';
+        }
+
+        // Update details
+        intervalDisplay.textContent = data.intervalMinutes + ' min';
+        domainsDisplay.textContent = data.domainsCount || 0;
+        lastRunDisplay.textContent = data.lastRunTime
+          ? formatIsraeliDate(new Date(data.lastRunTime))
+          : 'Never';
+        nextRunDisplay.textContent = data.nextRunTime
+          ? formatIsraeliDate(new Date(data.nextRunTime))
+          : '-';
       } else {
         statusValue.textContent = 'Disabled';
         statusValue.className = 'status-value inactive';
         indicator.style.display = 'none';
-        indicator.className = 'auto-run-indicator inactive';
+        indicator.className = 'auto-run-indicator-panel';
       }
 
       lastRun.textContent = data.lastRunTime
@@ -1132,7 +1227,7 @@
           return;
         }
 
-        const intervalMinutes = parseInt(intervalInput.value) || 60;
+        const intervalMinutes = parseInt(intervalInput.value) || 1;
 
         if (intervalMinutes < 1) {
           alert('Interval must be at least 1 minute');
