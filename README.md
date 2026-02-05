@@ -70,6 +70,57 @@ npm start
 3. Create an Apps Script with the provided `apps-script.js` code
 4. Deploy as Web App and copy the URL to Settings
 
+## How Each Parameter Is Found
+
+The scraper visits up to **3 pages** per domain to collect all parameters:
+
+### Page 1 — Domain Search Page
+
+`adstransparency.google.com/?region=anywhere&domain={domain}`
+
+| Parameter | How it's extracted |
+|---|---|
+| **Total Ads** | Regex on page text matching patterns like `2K ads`, `About 2K`, or `2,000 ads` (handles Hebrew `מודעות`). RTL/LTR Unicode markers are stripped first. |
+| **Publisher Name** | CSS selector `.advertiser-name` inside the first `creative-preview` element. Fallback: regex matching company names followed by "Verified"/"מאומת" in page text. |
+| **Publisher ID** | Parsed from `<a href="/advertiser/AR...">` link inside `creative-preview` elements via regex `/\/advertiser\/(AR\d+)/`. |
+| **Creative ID** | Parsed from `<a href="/advertiser/AR.../creative/CR...">` link inside `creative-preview` elements via regex `/\/creative\/(CR\d+)/`. |
+| **Ad Image/Video URL** | For image ads: `src` attribute of the first `<img>` with URL containing `googlesyndication` or `googleusercontent`. For video/text ads: direct link to the creative page (`adstransparency.google.com/advertiser/{publisherId}/creative/{creativeId}`). |
+| **Ad Text** | First 500 characters of `innerText` from the first `creative-preview` element. |
+| **Ad Formats** (partial) | Detected per ad card: `<video>` = Video, `<img>` = Image, otherwise Text. |
+
+### Page 2 — Advertiser Detail Page
+
+`adstransparency.google.com/advertiser/{publisherId}`
+
+Only visited if a Publisher ID was found on Page 1.
+
+| Parameter | How it's extracted |
+|---|---|
+| **Legal Name** | Regex matching label `שם חוקי:` (Hebrew) or `Legal name:` followed by the value. |
+| **Location** | Regex matching `מדינה:` or `Country:` followed by the value. Translated from Hebrew to English via a lookup table in `scraper.js`. |
+| **Verified** | Checks page text for `המפרסם אימת את הזהות`, `verified`, or `מאומת`. |
+
+### Page 3 — Creative Detail Page
+
+`adstransparency.google.com/advertiser/{publisherId}/creative/{creativeId}`
+
+Only visited if both a Publisher ID and a Creative ID (from the first ad) were found.
+
+| Parameter | How it's extracted |
+|---|---|
+| **Last Seen Date** | Regex matching `הוצגה בפעם האחרונה:` or `Last shown:` followed by the date. Hebrew month names translated to English. |
+| **Ad Format** | Regex matching `פורמט:` or `Format:` followed by the value. Hebrew (`תמונה`/`טקסט`/`סרטון`) translated to Image/Text/Video. |
+| **Shown In Regions** | Regex matching `הופיעו ב:` or `Shown in:` followed by the value. Hebrew region names translated to English. |
+
+### Not Scraped (Input / Generated)
+
+| Parameter | Source |
+|---|---|
+| **Domain** | Input — from Google Sheet CONFIG tab, column A. |
+| **Region** | Input — defaults to `anywhere`. |
+| **Scan Date** | Generated at scan time, formatted in Israel timezone (IST/IDT). |
+| **Status** | `success` or `error` based on whether scraping succeeded. |
+
 ## API Endpoints
 
 | Endpoint | Method | Description |

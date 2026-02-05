@@ -140,27 +140,58 @@ function saveResults(results) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let resultsSheet = ss.getSheetByName('RESULTS');
 
+  // Define headers - 16 columns total (including Creative ID)
+  const headers = [
+    'Domain',
+    'Publisher Name',
+    'Publisher ID',
+    'Creative ID',
+    'Legal Name',
+    'Verified',
+    'Location',
+    'Total Ads',
+    'Region',
+    'Ad Formats',
+    'Last Seen Date',
+    'Shown In Regions',
+    'Ad Image/Video URL',
+    'Ad Text',
+    'Scan Date',
+    'Status'
+  ];
+
   // Create RESULTS sheet if it doesn't exist
   if (!resultsSheet) {
     resultsSheet = ss.insertSheet('RESULTS');
     // Add headers
-    resultsSheet.getRange(1, 1, 1, 5).setValues([
-      ['Domain', 'Publisher Name', 'Total Ads', 'Scan Date', 'Status']
-    ]);
-    resultsSheet.getRange(1, 1, 1, 5).setFontWeight('bold');
+    resultsSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    resultsSheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
+    // Freeze header row
+    resultsSheet.setFrozenRows(1);
   }
 
   // Add results
   const rows = results.map(r => [
     r.domain || '',
     r.publisherName || '',
+    r.publisherId || '',
+    r.creativeId || '',
+    r.publisherLegalName || '',
+    r.publisherVerified ? 'Yes' : 'No',
+    r.publisherLocation || '',
     r.totalAds || 0,
+    r.region || 'anywhere',
+    Array.isArray(r.adFormats) ? r.adFormats.join(', ') : (r.adFormats || ''),
+    r.lastSeenDate || '',
+    r.shownInRegions || '',
+    r.adImageUrl || '',
+    r.adText || '',
     r.scanDate || new Date().toISOString(),
     r.status || 'completed'
   ]);
 
   const lastRow = resultsSheet.getLastRow();
-  resultsSheet.getRange(lastRow + 1, 1, rows.length, 5).setValues(rows);
+  resultsSheet.getRange(lastRow + 1, 1, rows.length, headers.length).setValues(rows);
 
   return {
     success: true,

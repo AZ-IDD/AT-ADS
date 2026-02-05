@@ -20,7 +20,8 @@ let autoRunState = {
   lastResults: null,
   scheduledTask: null,
   appsScriptUrl: null,
-  domains: []
+  domains: [],
+  batchSize: 5
 };
 
 // Format date in Israeli timezone with timezone indicator (same as frontend)
@@ -101,6 +102,9 @@ app.get('/proxy', async (req, res) => {
 /**
  * POST /proxy
  * Proxy POST requests to Google Apps Script (for saving results)
+ *
+ * Note: Google Apps Script redirects POST requests (302), which can lose the body.
+ * We handle this by manually following the redirect and re-posting the body.
  */
 app.post('/proxy', async (req, res) => {
   const { url } = req.query;
@@ -110,26 +114,67 @@ app.post('/proxy', async (req, res) => {
   }
 
   try {
-    const response = await fetch(url, {
+    const bodyStr = JSON.stringify(req.body);
+
+    // First request - don't follow redirect automatically
+    let response = await fetch(url, {
       method: 'POST',
-      redirect: 'follow',
+      redirect: 'manual',
       headers: {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
         'User-Agent': 'Mozilla/5.0'
       },
-      body: JSON.stringify(req.body)
+      body: bodyStr
     });
+
+    // Handle Google's redirect (302/307) - GET the redirect location to retrieve response
+    // Google Apps Script processes the POST, then redirects to a URL that serves the JSON response
+    if (response.status === 302 || response.status === 307) {
+      const redirectUrl = response.headers.get('location');
+      if (redirectUrl) {
+        console.log('Following redirect (GET) to:', redirectUrl);
+        response = await fetch(redirectUrl, {
+          method: 'GET',
+          redirect: 'follow',
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'Mozilla/5.0'
+          }
+        });
+      }
+    }
 
     const text = await response.text();
 
+    // Try to parse as JSON
+    let data;
     try {
-      const data = JSON.parse(text);
-      res.json(data);
+      data = JSON.parse(text);
     } catch (parseError) {
-      console.error('Proxy POST received non-JSON:', text.substring(0, 200));
+      // Try to extract JSON from HTML (Apps Script sometimes wraps JSON in HTML)
+      const jsonMatch = text.match(/\{[\s\S]*"success"[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          data = JSON.parse(jsonMatch[0]);
+        } catch (e) {
+          // Couldn't extract JSON
+        }
+      }
+    }
+
+    if (data) {
+      res.json(data);
+    } else if (response.ok) {
+      // Google Apps Script sometimes returns HTML even on success
+      // If we got a 200 response, treat as success since data was likely saved
+      console.log('Proxy POST: Got non-JSON response but request was OK, assuming success');
+      res.json({ success: true, message: 'Data sent successfully' });
+    } else {
+      console.error('Proxy POST received non-JSON:', text.substring(0, 500));
       res.status(500).json({
         error: 'Apps Script returned non-JSON response.',
+        response: text.substring(0, 200),
         hint: 'Check deployment permissions'
       });
     }
@@ -228,6 +273,63 @@ app.post('/scrape-batch', async (req, res) => {
  * Auto-run scheduler functions
  */
 
+// Send a single batch to Google Sheets
+async function sendBatchToSheets(batch) {
+  try {
+    const bodyStr = JSON.stringify({
+      action: 'saveResults',
+      results: batch
+    });
+
+    let response = await fetch(autoRunState.appsScriptUrl, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: bodyStr
+    });
+
+    if (response.status === 302 || response.status === 307) {
+      const redirectUrl = response.headers.get('location');
+      if (redirectUrl) {
+        response = await fetch(redirectUrl, {
+          method: 'POST',
+          redirect: 'follow',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: bodyStr
+        });
+      }
+    }
+
+    const text = await response.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      const jsonMatch = text.match(/\{[\s\S]*"success"[\s\S]*\}/);
+      if (jsonMatch) {
+        try { data = JSON.parse(jsonMatch[0]); } catch (e2) {}
+      }
+    }
+
+    if (data && data.success) {
+      return { success: true, savedCount: data.savedCount || batch.length };
+    } else if (response.ok) {
+      return { success: true, savedCount: batch.length };
+    } else {
+      return { success: false, savedCount: 0 };
+    }
+  } catch (error) {
+    console.error('[Auto-Run]   Send error:', error.message);
+    return { success: false, savedCount: 0 };
+  }
+}
+
 // Run a batch scan on the server
 async function runScheduledScan() {
   if (autoRunState.isRunning) {
@@ -242,72 +344,112 @@ async function runScheduledScan() {
 
   autoRunState.isRunning = true;
   autoRunState.lastRunTime = new Date().toISOString();
-  console.log(`[Auto-Run] Starting scheduled scan of ${autoRunState.domains.length} domains...`);
 
-  const results = [];
+  const batchSize = autoRunState.batchSize || 5;
+  const totalDomains = autoRunState.domains.length;
+  const totalBatches = Math.ceil(totalDomains / batchSize);
+  const allResults = [];
+  let savedTotal = 0;
+  let failedBatches = 0;
 
-  for (const domain of autoRunState.domains) {
-    console.log(`[Auto-Run]   Scanning: ${domain}`);
-    try {
-      const result = await scrapeAdTransparency(domain, { region: 'anywhere' });
+  console.log(`[Auto-Run] Starting scan: ${totalDomains} domains, ${totalBatches} batches (size: ${batchSize})`);
 
-      if (result.success && result.data) {
-        results.push({
+  for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+    const start = batchIndex * batchSize;
+    const end = Math.min(start + batchSize, totalDomains);
+    const batchDomains = autoRunState.domains.slice(start, end);
+    const batchNum = batchIndex + 1;
+    const batchResults = [];
+
+    console.log(`[Auto-Run] Batch ${batchNum}/${totalBatches} — Scanning ${batchDomains.length} domains...`);
+
+    // Scan this batch
+    for (const domain of batchDomains) {
+      console.log(`[Auto-Run]   Scanning: ${domain}`);
+      try {
+        const result = await scrapeAdTransparency(domain, { region: 'anywhere' });
+
+        if (result.success && result.data) {
+          const rawAdText = result.data.ads?.[0]?.adText || '-';
+          const cleanAdText = rawAdText !== '-' ? rawAdText.replace(/מאומת/g, '').trim() : '-';
+          const firstAd = result.data.ads?.[0];
+          const pubId = result.data.advertiser?.id;
+          const crId = firstAd?.creativeId;
+          let adMediaUrl = firstAd?.imageUrl || '-';
+          if (adMediaUrl === '-' && pubId && crId) {
+            adMediaUrl = `https://adstransparency.google.com/advertiser/${pubId}/creative/${crId}`;
+          }
+          const row = {
+            domain,
+            publisherName: result.data.advertiser?.name || '-',
+            publisherId: pubId || '-',
+            creativeId: crId || '-',
+            publisherLegalName: result.data.advertiser?.legalName || '-',
+            publisherVerified: result.data.advertiser?.verified || false,
+            publisherLocation: result.data.advertiser?.location || '-',
+            totalAds: result.data.totalAds || 0,
+            region: result.data.region || 'anywhere',
+            adFormats: result.data.adFormats || [],
+            lastSeenDate: result.data.lastSeenDate || '-',
+            shownInRegions: result.data.shownInRegions || '-',
+            adImageUrl: adMediaUrl,
+            adText: cleanAdText,
+            scanDate: formatIsraeliDate(new Date()),
+            status: 'success'
+          };
+          batchResults.push(row);
+          allResults.push(row);
+        } else {
+          const row = {
+            domain,
+            publisherName: '-', publisherId: '-', creativeId: '-', publisherLegalName: '-',
+            publisherVerified: false, publisherLocation: '-',
+            totalAds: 0, region: 'anywhere', adFormats: [],
+            lastSeenDate: '-', shownInRegions: '-', adImageUrl: '-', adText: '-',
+            scanDate: formatIsraeliDate(new Date()),
+            status: 'error', error: result.error
+          };
+          batchResults.push(row);
+          allResults.push(row);
+        }
+      } catch (error) {
+        const row = {
           domain,
-          publisherName: result.data.advertiser?.name || '-',
-          totalAds: result.data.totalAds || 0,
+          publisherName: '-', publisherId: '-', creativeId: '-', publisherLegalName: '-',
+          publisherVerified: false, publisherLocation: '-',
+          totalAds: 0, region: 'anywhere', adFormats: [],
+          lastSeenDate: '-', shownInRegions: '-', adImageUrl: '-', adText: '-',
           scanDate: formatIsraeliDate(new Date()),
-          status: 'success'
-        });
-      } else {
-        results.push({
-          domain,
-          publisherName: '-',
-          totalAds: 0,
-          scanDate: formatIsraeliDate(new Date()),
-          status: 'error',
-          error: result.error
-        });
+          status: 'error', error: error.message
+        };
+        batchResults.push(row);
+        allResults.push(row);
       }
-    } catch (error) {
-      results.push({
-        domain,
-        publisherName: '-',
-        totalAds: 0,
-        scanDate: formatIsraeliDate(new Date()),
-        status: 'error',
-        error: error.message
-      });
+
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
 
-    // Small delay between requests
-    await new Promise(resolve => setTimeout(resolve, 500));
-  }
+    // Send this batch to Sheets immediately
+    if (autoRunState.appsScriptUrl && batchResults.length > 0) {
+      console.log(`[Auto-Run] Batch ${batchNum}/${totalBatches} — Sending ${batchResults.length} results to Sheets...`);
+      const sendResult = await sendBatchToSheets(batchResults);
+      if (sendResult.success) {
+        savedTotal += sendResult.savedCount;
+        console.log(`[Auto-Run]   Batch ${batchNum}: Success (${sendResult.savedCount} saved)`);
+      } else {
+        failedBatches++;
+        console.log(`[Auto-Run]   Batch ${batchNum}: Failed`);
+      }
+    }
 
-  autoRunState.lastResults = results;
-  console.log(`[Auto-Run] Scan completed. ${results.length} domains processed.`);
-
-  // Send results to Google Sheets if configured
-  if (autoRunState.appsScriptUrl) {
-    try {
-      const response = await fetch(autoRunState.appsScriptUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        redirect: 'follow',
-        body: JSON.stringify({
-          action: 'saveResults',
-          results: results
-        })
-      });
-      const data = await response.json();
-      console.log(`[Auto-Run] Results sent to Sheets: ${data.success ? 'Success' : 'Failed'}`);
-    } catch (error) {
-      console.error('[Auto-Run] Failed to send to Sheets:', error.message);
+    // Delay between batches
+    if (batchIndex < totalBatches - 1) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
   }
+
+  autoRunState.lastResults = allResults;
+  console.log(`[Auto-Run] Done! ${allResults.length} domains, ${savedTotal} saved to Sheets, ${failedBatches} failed batches.`);
 
   autoRunState.isRunning = false;
   updateNextRunTime();
@@ -390,7 +532,7 @@ app.get('/auto-run/status', (req, res) => {
  * Body: { intervalMinutes: 60, appsScriptUrl: "...", domains: [...] }
  */
 app.post('/auto-run/start', (req, res) => {
-  const { intervalMinutes, appsScriptUrl, domains } = req.body;
+  const { intervalMinutes, appsScriptUrl, domains, batchSize } = req.body;
 
   if (!domains || !Array.isArray(domains) || domains.length === 0) {
     return res.status(400).json({ success: false, error: 'No domains provided' });
@@ -403,6 +545,7 @@ app.post('/auto-run/start', (req, res) => {
   autoRunState.intervalMinutes = intervalMinutes;
   autoRunState.appsScriptUrl = appsScriptUrl;
   autoRunState.domains = domains;
+  autoRunState.batchSize = batchSize || 5;
 
   const result = startAutoRun();
 

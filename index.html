@@ -596,6 +596,103 @@
       0%, 100% { opacity: 1; transform: scale(1); }
       50% { opacity: 0.6; transform: scale(0.9); }
     }
+
+    /* Run Plan Panel */
+    .run-plan-panel {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 1rem 1.5rem;
+      margin: 1rem auto 1.5rem;
+      max-width: 500px;
+    }
+
+    .run-plan-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 0.75rem;
+      text-align: center;
+    }
+
+    .run-plan-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+    }
+
+    .run-plan-item {
+      text-align: center;
+    }
+
+    .run-plan-label {
+      display: block;
+      font-size: 0.75rem;
+      color: #64748b;
+      margin-bottom: 0.25rem;
+    }
+
+    .run-plan-value {
+      display: block;
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #3b82f6;
+    }
+
+    /* Detailed Progress Panel */
+    .progress-panel {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 1.25rem;
+      margin: 1rem auto;
+      max-width: 600px;
+    }
+
+    .progress-section {
+      margin-bottom: 1.25rem;
+    }
+
+    .progress-section:last-child {
+      margin-bottom: 0;
+    }
+
+    .progress-section-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #e2e8f0;
+      margin-bottom: 0.5rem;
+    }
+
+    .progress-details {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 0.5rem;
+      font-size: 0.85rem;
+    }
+
+    .progress-stats {
+      display: flex;
+      gap: 1rem;
+    }
+
+    .stat-success {
+      color: #22c55e;
+    }
+
+    .stat-error {
+      color: #ef4444;
+    }
+
+    .progress-current {
+      margin-top: 0.5rem;
+      font-size: 0.8rem;
+      color: #64748b;
+      font-style: italic;
+    }
   </style>
 </head>
 <body>
@@ -642,16 +739,62 @@
               </div>
             </div>
           </div>
+          <!-- Run Plan Panel -->
+          <div id="runPlanPanel" class="run-plan-panel" style="display: none;">
+            <div class="run-plan-title">Run Plan</div>
+            <div class="run-plan-grid">
+              <div class="run-plan-item">
+                <span class="run-plan-label">Domains to scan</span>
+                <span class="run-plan-value" id="planDomains">0</span>
+              </div>
+              <div class="run-plan-item">
+                <span class="run-plan-label">Batch size</span>
+                <span class="run-plan-value" id="planBatchSize">5</span>
+              </div>
+              <div class="run-plan-item">
+                <span class="run-plan-label">Batches to send</span>
+                <span class="run-plan-value" id="planBatches">0</span>
+              </div>
+            </div>
+          </div>
+
           <button class="btn btn-success btn-lg" id="startBtn" onclick="startBatchScan()" disabled>
             START
           </button>
-          <div class="status" id="status"></div>
-          <div class="progress-container" id="progressContainer" style="display: none;">
-            <div class="progress-bar">
-              <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+
+          <!-- Detailed Progress Panel -->
+          <div id="progressPanel" class="progress-panel" style="display: none;">
+            <div class="progress-section">
+              <div class="progress-section-title">Scanning Domains</div>
+              <div class="progress-bar">
+                <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+              </div>
+              <div class="progress-details">
+                <span id="progressText">0 / 0</span>
+                <span class="progress-stats">
+                  <span class="stat-success" id="scanSuccessCount">0 success</span>
+                  <span class="stat-error" id="scanErrorCount">0 errors</span>
+                </span>
+              </div>
+              <div class="progress-current" id="currentDomain"></div>
             </div>
-            <div class="progress-text" id="progressText">0 / 0 domains scanned</div>
+
+            <div class="progress-section" id="sheetsSection" style="display: none;">
+              <div class="progress-section-title">Sending to Sheets</div>
+              <div class="progress-bar">
+                <div class="progress-fill" id="sheetsProgressFill" style="width: 0%; background: #22c55e;"></div>
+              </div>
+              <div class="progress-details">
+                <span id="sheetsProgressText">Batch 0 / 0</span>
+                <span class="progress-stats">
+                  <span class="stat-success" id="sheetsSavedCount">0 saved</span>
+                  <span class="stat-error" id="sheetsFailedCount">0 failed</span>
+                </span>
+              </div>
+            </div>
           </div>
+
+          <div class="status" id="status"></div>
         </div>
       </div>
 
@@ -680,19 +823,24 @@
           </div>
         </div>
 
-        <table class="results-table">
-          <thead>
-            <tr>
-              <th>Domain</th>
-              <th>Publisher Name</th>
-              <th>Total Ads</th>
-              <th>Scanned At</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody id="resultsBody">
-          </tbody>
-        </table>
+        <div style="overflow-x: auto;">
+          <table class="results-table">
+            <thead>
+              <tr>
+                <th>Domain</th>
+                <th>Publisher</th>
+                <th>Location</th>
+                <th>Total Ads</th>
+                <th>Format</th>
+                <th>Last Seen</th>
+                <th>Scanned At</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="resultsBody">
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 
@@ -708,8 +856,17 @@
           <input type="url" id="appsScriptUrl" placeholder="https://script.google.com/macros/s/xxxxx/exec" />
         </div>
 
+        <div class="form-group">
+          <label class="form-label">Batch Size (results per request to Sheets)</label>
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <input type="number" id="batchSize" value="5" min="1" max="20" style="width: 80px;" />
+            <span style="color: #64748b; font-size: 0.85rem;">results per batch (1-20, recommended: 5)</span>
+          </div>
+        </div>
+
         <p style="color: #64748b; font-size: 0.85rem; margin-bottom: 1.5rem;">
           Enter the deployed Web App URL from your Google Apps Script.
+          Results are sent to Sheets in batches to avoid Apps Script limitations.
           See <code>apps-script.js</code> for setup instructions.
         </p>
 
@@ -835,21 +992,34 @@
       if (settings.appsScriptUrl) {
         document.getElementById('appsScriptUrl').value = settings.appsScriptUrl;
       }
+      if (settings.batchSize) {
+        document.getElementById('batchSize').value = settings.batchSize;
+      } else {
+        settings.batchSize = 5; // Default
+      }
     }
 
     function saveSettings() {
       const url = document.getElementById('appsScriptUrl').value.trim();
+      const batchSize = parseInt(document.getElementById('batchSize').value) || 5;
 
       if (!url) {
         showSaveMessage('Please enter a valid URL', 'error');
         return;
       }
 
+      if (batchSize < 1 || batchSize > 20) {
+        showSaveMessage('Batch size must be between 1 and 20', 'error');
+        return;
+      }
+
       settings.appsScriptUrl = url;
+      settings.batchSize = batchSize;
       localStorage.setItem('adsSettings', JSON.stringify(settings));
 
       showSaveMessage('Settings saved successfully!', 'success');
       checkConfiguration();
+      updateRunPlan();
     }
 
     function showSaveMessage(message, type) {
@@ -917,17 +1087,40 @@
           );
           countEl.textContent = `${settings.domains.length} domains loaded from Google Sheet`;
           btn.disabled = settings.domains.length === 0;
+
+          // Show run plan
+          updateRunPlan();
         } else {
           countEl.textContent = 'Error: ' + (data.error || 'Failed to load domains');
           btn.disabled = true;
+          document.getElementById('runPlanPanel').style.display = 'none';
         }
       } catch (error) {
         countEl.textContent = 'Error loading domains: ' + error.message;
         btn.disabled = true;
+        document.getElementById('runPlanPanel').style.display = 'none';
+      }
+    }
+
+    function updateRunPlan() {
+      const domainsCount = settings.domains?.length || 0;
+      const batchSize = settings.batchSize || 5;
+      const batchesCount = Math.ceil(domainsCount / batchSize);
+
+      document.getElementById('planDomains').textContent = domainsCount;
+      document.getElementById('planBatchSize').textContent = batchSize;
+      document.getElementById('planBatches').textContent = batchesCount;
+
+      if (domainsCount > 0) {
+        document.getElementById('runPlanPanel').style.display = 'block';
+      } else {
+        document.getElementById('runPlanPanel').style.display = 'none';
       }
     }
 
     // Scanning
+    let scanStats = { success: 0, errors: 0 };
+
     function setStatus(message, type = '') {
       const status = document.getElementById('status');
       status.className = 'status ' + type;
@@ -936,15 +1129,21 @@
         : `<span>${message}</span>`;
     }
 
-    function updateProgress(current, total) {
-      const container = document.getElementById('progressContainer');
+    function updateProgress(current, total, currentDomain = '') {
+      const panel = document.getElementById('progressPanel');
       const fill = document.getElementById('progressFill');
       const text = document.getElementById('progressText');
+      const successEl = document.getElementById('scanSuccessCount');
+      const errorEl = document.getElementById('scanErrorCount');
+      const currentEl = document.getElementById('currentDomain');
 
-      container.style.display = 'block';
+      panel.style.display = 'block';
       const percent = total > 0 ? (current / total) * 100 : 0;
       fill.style.width = percent + '%';
-      text.textContent = `${current} / ${total} domains scanned`;
+      text.textContent = `${current} / ${total}`;
+      successEl.textContent = `${scanStats.success} success`;
+      errorEl.textContent = `${scanStats.errors} errors`;
+      currentEl.textContent = currentDomain ? `Scanning: ${currentDomain}` : '';
     }
 
     async function startBatchScan() {
@@ -952,10 +1151,21 @@
 
       isScanning = true;
       scanResults = [];
+      scanStats = { success: 0, errors: 0 };
+      const batchSize = settings.batchSize || 5;
+      const totalDomains = settings.domains.length;
+      const totalBatches = Math.ceil(totalDomains / batchSize);
+      let sheetsStats = { saved: 0, failed: 0, batchesSent: 0 };
       const startTime = new Date();
 
       const btn = document.getElementById('startBtn');
       btn.disabled = true;
+
+      // Hide run plan, show progress panel
+      document.getElementById('runPlanPanel').style.display = 'none';
+      document.getElementById('progressPanel').style.display = 'block';
+      document.getElementById('sheetsSection').style.display = 'block';
+      updateSheetsProgress(0, totalBatches, 0, 0);
 
       document.getElementById('resultsPanel').style.display = 'block';
       document.getElementById('resultsBody').innerHTML = '';
@@ -965,82 +1175,179 @@
         addResultRow({
           domain: domain,
           publisherName: '-',
+          publisherId: '-',
+          creativeId: '-',
+          publisherLegalName: '-',
+          publisherVerified: false,
+          publisherLocation: '-',
           totalAds: '-',
+          adFormats: [],
+          lastSeenDate: '-',
+          shownInRegions: '-',
           scannedAt: '-',
           status: 'pending'
         });
       });
 
       setStatus('Starting batch scan...', 'loading');
+      updateProgress(0, totalDomains, '');
 
-      for (let i = 0; i < settings.domains.length; i++) {
-        const domain = settings.domains[i];
+      // Process domains in batches: scan batchSize, send to sheets, repeat
+      for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+        const batchStart = batchIndex * batchSize;
+        const batchEnd = Math.min(batchStart + batchSize, totalDomains);
+        const batchDomains = settings.domains.slice(batchStart, batchEnd);
+        const batchNum = batchIndex + 1;
+        let batchResults = [];
 
-        updateProgress(i, settings.domains.length);
-        setStatus(`Scanning ${domain}...`, 'loading');
+        // --- SCAN this batch ---
+        for (let j = 0; j < batchDomains.length; j++) {
+          const domain = batchDomains[j];
+          const globalIndex = batchStart + j;
 
-        // Update row to scanning status
-        updateResultRow(domain, { status: 'scanning' });
+          updateProgress(globalIndex, totalDomains, domain);
+          setStatus(`Batch ${batchNum}/${totalBatches} — Scanning domain ${globalIndex + 1} of ${totalDomains}...`, 'loading');
 
-        try {
-          const response = await fetch(`/scrape?domain=${encodeURIComponent(domain)}`);
-          const result = await response.json();
+          // Update row to scanning status
+          updateResultRow(domain, { status: 'scanning' });
 
-          if (result.success && result.data) {
-            const data = result.data;
-            const rowData = {
-              domain: domain,
-              publisherName: data.advertiser?.name || '-',
-              totalAds: data.totalAds || 0,
-              scannedAt: formatIsraeliDate(new Date()),
-              status: 'success'
-            };
+          try {
+            const response = await fetch(`/scrape?domain=${encodeURIComponent(domain)}`);
+            const result = await response.json();
 
-            scanResults.push(rowData);
-            updateResultRow(domain, rowData);
-          } else {
+            if (result.success && result.data) {
+              const data = result.data;
+              const firstAd = data.ads?.[0];
+              const pubId = data.advertiser?.id;
+              const crId = firstAd?.creativeId;
+              let adMediaUrl = firstAd?.imageUrl || '-';
+              if (adMediaUrl === '-' && pubId && crId) {
+                adMediaUrl = `https://adstransparency.google.com/advertiser/${pubId}/creative/${crId}`;
+              }
+              const rowData = {
+                domain: domain,
+                publisherName: data.advertiser?.name || '-',
+                publisherId: pubId || '-',
+                creativeId: crId || '-',
+                publisherLegalName: data.advertiser?.legalName || '-',
+                publisherVerified: data.advertiser?.verified || false,
+                publisherLocation: data.advertiser?.location || '-',
+                totalAds: data.totalAds || 0,
+                region: data.region || 'anywhere',
+                adFormats: data.adFormats || [],
+                lastSeenDate: data.lastSeenDate || '-',
+                shownInRegions: data.shownInRegions || '-',
+                adImageUrl: adMediaUrl,
+                adText: data.ads?.[0]?.adText || '-',
+                scannedAt: formatIsraeliDate(new Date()),
+                status: 'success'
+              };
+
+              scanResults.push(rowData);
+              batchResults.push(rowData);
+              updateResultRow(domain, rowData);
+              scanStats.success++;
+            } else {
+              const rowData = {
+                domain: domain,
+                publisherName: '-',
+                publisherId: '-',
+                creativeId: '-',
+                publisherLegalName: '-',
+                publisherVerified: false,
+                publisherLocation: '-',
+                totalAds: 0,
+                region: 'anywhere',
+                adFormats: [],
+                lastSeenDate: '-',
+                shownInRegions: '-',
+                adImageUrl: '-',
+                adText: '-',
+                scannedAt: formatIsraeliDate(new Date()),
+                status: 'error',
+                error: result.error
+              };
+
+              scanResults.push(rowData);
+              batchResults.push(rowData);
+              updateResultRow(domain, rowData);
+              scanStats.errors++;
+            }
+          } catch (error) {
             const rowData = {
               domain: domain,
               publisherName: '-',
+              publisherId: '-',
+              creativeId: '-',
+              publisherLegalName: '-',
+              publisherVerified: false,
+              publisherLocation: '-',
               totalAds: 0,
+              region: 'anywhere',
+              adFormats: [],
+              lastSeenDate: '-',
+              shownInRegions: '-',
+              adImageUrl: '-',
+              adText: '-',
               scannedAt: formatIsraeliDate(new Date()),
               status: 'error',
-              error: result.error
+              error: error.message
             };
 
             scanResults.push(rowData);
+            batchResults.push(rowData);
             updateResultRow(domain, rowData);
+            scanStats.errors++;
           }
-        } catch (error) {
-          const rowData = {
-            domain: domain,
-            publisherName: '-',
-            totalAds: 0,
-            scannedAt: formatIsraeliDate(new Date()),
-            status: 'error',
-            error: error.message
-          };
 
-          scanResults.push(rowData);
-          updateResultRow(domain, rowData);
+          // Small delay between requests
+          if (j < batchDomains.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
         }
 
-        // Small delay between requests
-        if (i < settings.domains.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 500));
+        // Update scan progress after batch completes
+        updateProgress(batchEnd, totalDomains, '');
+
+        // --- SEND this batch to Sheets ---
+        if (settings.appsScriptUrl && batchResults.length > 0) {
+          setStatus(`Batch ${batchNum}/${totalBatches} — Sending ${batchResults.length} results to Sheets...`, 'loading');
+
+          const sendResult = await sendBatchToSheets(batchResults);
+          sheetsStats.batchesSent++;
+
+          if (sendResult.success) {
+            sheetsStats.saved += sendResult.savedCount;
+          } else {
+            sheetsStats.failed++;
+          }
+
+          updateSheetsProgress(sheetsStats.batchesSent, totalBatches, sheetsStats.saved, sheetsStats.failed);
+        }
+
+        // Delay between batches
+        if (batchIndex < totalBatches - 1) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
       }
 
-      updateProgress(settings.domains.length, settings.domains.length);
+      // Final updates
+      updateProgress(totalDomains, totalDomains, '');
+      document.getElementById('currentDomain').textContent = 'Done!';
+      updateSheetsProgress(totalBatches, totalBatches, sheetsStats.saved, sheetsStats.failed);
 
       const endTime = new Date();
       const duration = Math.round((endTime - startTime) / 1000);
-
       updateSummaryStats(duration);
-      setStatus(`Scan completed in ${duration} seconds. Sending to Sheets...`, 'loading');
 
-      // Automatically send results to Google Sheets
-      await sendToSheets();
+      if (sheetsStats.failed === 0) {
+        setStatus(`Done! ${duration}s — ${scanStats.success} success, ${scanStats.errors} errors — ${sheetsStats.saved} saved to Sheets (${totalBatches} batches)`, 'success');
+      } else {
+        setStatus(`Done! ${duration}s — ${scanStats.success} success, ${scanStats.errors} errors — ${sheetsStats.saved} saved, ${sheetsStats.failed} batch(es) failed`, 'error');
+      }
+
+      // Show run plan again after completion
+      updateRunPlan();
 
       btn.disabled = false;
       isScanning = false;
@@ -1068,11 +1375,16 @@
       const statusText = data.status === 'scanning' ? 'Scanning...' :
                          data.status === 'pending' ? 'Pending' :
                          data.status === 'success' ? 'Done' : 'Error';
+      const formats = Array.isArray(data.adFormats) ? data.adFormats.join(', ') : (data.adFormats || '-');
+      const verifiedBadge = data.publisherVerified ? ' <span style="color: #22c55e;">✓</span>' : '';
 
       return `
         <td class="domain">${data.domain}</td>
-        <td class="publisher">${data.publisherName}</td>
+        <td class="publisher">${data.publisherName}${verifiedBadge}</td>
+        <td>${data.publisherLocation || '-'}</td>
         <td class="ads-count ${adsClass}">${data.totalAds}</td>
+        <td>${formats}</td>
+        <td style="font-size: 0.85rem;">${data.lastSeenDate || '-'}</td>
         <td class="timestamp">${data.scannedAt}</td>
         <td>
           <span class="status-badge ${statusClass}">${statusText}</span>
@@ -1096,50 +1408,69 @@
       scanResults = [];
       document.getElementById('resultsBody').innerHTML = '';
       document.getElementById('resultsPanel').style.display = 'none';
-      document.getElementById('progressContainer').style.display = 'none';
+      document.getElementById('progressPanel').style.display = 'none';
       setStatus('');
+      updateRunPlan();
     }
 
-    async function sendToSheets() {
-      if (!scanResults || scanResults.length === 0) {
-        setStatus('No results to send to Sheets', 'error');
-        return;
-      }
-
-      if (!settings.appsScriptUrl) {
-        setStatus('Scan complete. Apps Script not configured - results not sent to Sheets.', 'success');
-        return;
-      }
+    async function sendBatchToSheets(batchResults) {
+      const prepared = batchResults.map(r => ({
+        domain: r.domain,
+        publisherName: r.publisherName,
+        publisherId: r.publisherId,
+        creativeId: r.creativeId,
+        publisherLegalName: r.publisherLegalName,
+        publisherVerified: r.publisherVerified,
+        publisherLocation: r.publisherLocation,
+        totalAds: r.totalAds,
+        region: r.region,
+        adFormats: r.adFormats,
+        lastSeenDate: r.lastSeenDate,
+        shownInRegions: r.shownInRegions,
+        adImageUrl: r.adImageUrl,
+        adText: r.adText ? r.adText.replace(/מאומת/g, '').trim() : r.adText,
+        scanDate: r.scannedAt,
+        status: r.status
+      }));
 
       try {
         const proxyUrl = `/proxy?url=${encodeURIComponent(settings.appsScriptUrl)}`;
         const response = await fetch(proxyUrl, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             action: 'saveResults',
-            results: scanResults.map(r => ({
-              domain: r.domain,
-              publisherName: r.publisherName,
-              totalAds: r.totalAds,
-              scanDate: r.scannedAt,
-              status: r.status
-            }))
+            results: prepared
           })
         });
 
         const data = await response.json();
 
         if (data.success) {
-          setStatus(`Scan complete! ${data.savedCount} results saved to RESULTS sheet.`, 'success');
+          return { success: true, savedCount: data.savedCount || prepared.length };
         } else {
-          setStatus('Scan complete. Failed to save to Sheets: ' + (data.error || 'Unknown error'), 'error');
+          console.error('Batch send failed:', data.error);
+          return { success: false, savedCount: 0 };
         }
       } catch (error) {
-        setStatus('Scan complete. Failed to save to Sheets: ' + error.message, 'error');
+        console.error('Batch send error:', error.message);
+        return { success: false, savedCount: 0 };
       }
+    }
+
+    function updateSheetsProgress(current, total, saved, failed) {
+      const section = document.getElementById('sheetsSection');
+      const fill = document.getElementById('sheetsProgressFill');
+      const text = document.getElementById('sheetsProgressText');
+      const savedEl = document.getElementById('sheetsSavedCount');
+      const failedEl = document.getElementById('sheetsFailedCount');
+
+      section.style.display = 'block';
+      const percent = total > 0 ? (current / total) * 100 : 0;
+      fill.style.width = percent + '%';
+      text.textContent = `Batch ${current} / ${total}`;
+      savedEl.textContent = `${saved} saved`;
+      failedEl.textContent = `${failed} failed`;
     }
 
     // Auto-Run Functions
@@ -1242,7 +1573,8 @@
             body: JSON.stringify({
               intervalMinutes: intervalMinutes,
               appsScriptUrl: settings.appsScriptUrl,
-              domains: settings.domains
+              domains: settings.domains,
+              batchSize: settings.batchSize || 5
             })
           });
 
