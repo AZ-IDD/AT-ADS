@@ -140,24 +140,22 @@ function saveResults(results) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let resultsSheet = ss.getSheetByName('RESULTS');
 
-  // Define headers - 16 columns total (including Creative ID)
+  // Define headers - 14 columns total
   const headers = [
+    'Scan Date',
+    'Verified',
     'Domain',
     'Publisher Name',
     'Publisher ID',
     'Creative ID',
-    'Legal Name',
-    'Verified',
     'Location',
     'Total Ads',
-    'Region',
+    'Ads in View',
     'Ad Formats',
     'Last Seen Date',
-    'Shown In Regions',
     'Ad Image/Video URL',
     'Ad Text',
-    'Scan Date',
-    'Status'
+    'Ads Transparency URL'
   ];
 
   // Create RESULTS sheet if it doesn't exist
@@ -172,22 +170,20 @@ function saveResults(results) {
 
   // Add results
   const rows = results.map(r => [
+    r.scanDate || new Date().toISOString(),
+    r.publisherVerified ? 'Yes' : 'No',
     r.domain || '',
     r.publisherName || '',
     r.publisherId || '',
     r.creativeId || '',
-    r.publisherLegalName || '',
-    r.publisherVerified ? 'Yes' : 'No',
     r.publisherLocation || '',
     r.totalAds || 0,
-    r.region || 'anywhere',
+    r.adsInView || 0,
     Array.isArray(r.adFormats) ? r.adFormats.join(', ') : (r.adFormats || ''),
     r.lastSeenDate || '',
-    r.shownInRegions || '',
     r.adImageUrl || '',
     r.adText || '',
-    r.scanDate || new Date().toISOString(),
-    r.status || 'completed'
+    r.adsTransparencyUrl || ''
   ]);
 
   const lastRow = resultsSheet.getLastRow();

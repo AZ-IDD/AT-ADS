@@ -133,6 +133,43 @@ async function scrapeAdTransparency(domain, options = {}) {
     // Additional wait to ensure dynamic content loads
     await new Promise(resolve => setTimeout(resolve, 3000));
 
+    // Click "See all ads" link to load more ads for screenshot
+    console.log('Looking for "See all ads" link...');
+    const seeAllClicked = await page.evaluate(() => {
+      const links = Array.from(document.querySelectorAll('a'));
+      for (const link of links) {
+        const text = link.textContent.trim().toLowerCase();
+        if (text.includes('see all ads') || text.includes('ראו את כל המודעות') ||
+            text.includes('see all') || text.includes('כל המודעות')) {
+          link.click();
+          return { clicked: true, text: link.textContent.trim() };
+        }
+      }
+      const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
+      for (const btn of buttons) {
+        const text = btn.textContent.trim().toLowerCase();
+        if (text.includes('see all') || text.includes('כל המודעות')) {
+          btn.click();
+          return { clicked: true, text: btn.textContent.trim() };
+        }
+      }
+      return { clicked: false };
+    });
+
+    if (seeAllClicked.clicked) {
+      console.log(`  Clicked: "${seeAllClicked.text}"`);
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      await page.waitForFunction(() => {
+        const ads = document.querySelectorAll('creative-preview');
+        return ads.length > 10;
+      }, { timeout: 15000 }).catch(() => {
+        console.log('  Timeout waiting for more ads after "See all ads"...');
+      });
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    } else {
+      console.log('  "See all ads" link not found, staying on current page');
+    }
+
     // Extract data from the page
     const data = await page.evaluate((searchDomain, searchRegion) => {
       const result = {
@@ -196,7 +233,6 @@ async function scrapeAdTransparency(domain, options = {}) {
           result.advertiser = {
             id: advertiserMatch ? advertiserMatch[1] : null,
             name: null,
-            legalName: null,
             verified: false,
             location: null
           };
@@ -213,7 +249,7 @@ async function scrapeAdTransparency(domain, options = {}) {
       const advertiserNameMatch = cleanText.match(/\n([A-Za-z0-9][A-Za-z0-9\s]+(?:LTD|LLC|Inc|Corp|Ltd)\.?)\s*\n\s*(?:מאומת|Verified)/i);
       if (advertiserNameMatch) {
         if (!result.advertiser) {
-          result.advertiser = { id: null, name: null, legalName: null, verified: false, location: null };
+          result.advertiser = { id: null, name: null, verified: false, location: null };
         }
         result.advertiser.name = advertiserNameMatch[1].trim();
         result.advertiser.verified = true;
@@ -225,6 +261,7 @@ async function scrapeAdTransparency(domain, options = {}) {
         const link = el.querySelector('a[href*="/creative/"]');
         const href = link ? link.getAttribute('href') : '';
         const creativeMatch = href.match(/\/creative\/(CR\d+)/);
+        const advertiserIdMatch = href.match(/\/advertiser\/(AR\d+)/);
         const ariaLabel = link ? link.getAttribute('aria-label') : '';
 
         // Parse "מודעה (1 מתוך 80)" or "Ad (1 of 80)"
@@ -263,6 +300,7 @@ async function scrapeAdTransparency(domain, options = {}) {
         return {
           index: index,
           creativeId: creativeMatch ? creativeMatch[1] : null,
+          advertiserId: advertiserIdMatch ? advertiserIdMatch[1] : null,
           position: positionMatch ? parseInt(positionMatch[1]) : index + 1,
           totalInView: positionMatch ? parseInt(positionMatch[2]) : null,
           url: href ? `https://adstransparency.google.com${href}` : null,
@@ -300,126 +338,175 @@ async function scrapeAdTransparency(domain, options = {}) {
       return result;
     }, domain, region);
 
-    // If we have an advertiser ID, fetch additional details from advertiser page
-    if (data.advertiser?.id) {
-      console.log(`Fetching advertiser details for: ${data.advertiser.id}`);
-      const advertiserUrl = `https://adstransparency.google.com/advertiser/${data.advertiser.id}?region=${region}`;
+    // Take full-page screenshot before navigating to detail pages
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
-      await page.goto(advertiserUrl, {
-        waitUntil: 'networkidle2',
-        timeout: timeout
-      });
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      const advertiserDetails = await page.evaluate(() => {
-        const text = document.body.innerText;
-        const cleanText = text.replace(/[\u200F\u200E]/g, '');
-
-        const details = {
-          legalName: null,
-          location: null,
-          verified: false
-        };
-
-        // Extract legal name - "שם חוקי: ToGo Networks LTD" or "Legal name: ..."
-        const legalNameMatch = cleanText.match(/(?:שם חוקי|Legal name)[:\s]+([^\n]+)/i);
-        if (legalNameMatch) {
-          details.legalName = legalNameMatch[1].trim();
-        }
-
-        // Extract country - "מדינה: Israel" or "Country: ..."
-        const countryMatch = cleanText.match(/(?:מדינה|Country)[:\s]+([^\n]+)/i);
-        if (countryMatch) {
-          details.location = countryMatch[1].trim();
-        }
-
-        // Check verified status
-        if (cleanText.includes('המפרסם אימת את הזהות') ||
-            cleanText.includes('verified') ||
-            cleanText.includes('מאומת')) {
-          details.verified = true;
-        }
-
-        return details;
-      });
-
-      // Merge advertiser details
-      if (advertiserDetails.legalName) {
-        data.advertiser.legalName = advertiserDetails.legalName;
-      }
-      if (advertiserDetails.location) {
-        data.advertiser.location = translateToEnglish(advertiserDetails.location);
-      }
-      if (advertiserDetails.verified) {
-        data.advertiser.verified = true;
-      }
-    }
-
-    // If we have ads, fetch details from the first ad to get lastSeenDate and format
-    if (data.ads.length > 0 && data.ads[0].creativeId && data.advertiser?.id) {
-      console.log(`Fetching ad details for: ${data.ads[0].creativeId}`);
-      const creativeUrl = `https://adstransparency.google.com/advertiser/${data.advertiser.id}/creative/${data.ads[0].creativeId}?region=${region}`;
-
-      await page.goto(creativeUrl, {
-        waitUntil: 'networkidle2',
-        timeout: timeout
-      });
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      const adDetails = await page.evaluate(() => {
-        const text = document.body.innerText;
-        const cleanText = text.replace(/[\u200F\u200E]/g, '');
-
-        const details = {
-          lastSeenDate: null,
-          format: null,
-          shownIn: null
-        };
-
-        // Extract last shown date - "הוצגה בפעם האחרונה: 4 בפבר׳ 2026" or "Last shown: ..."
-        const lastShownMatch = cleanText.match(/(?:הוצגה בפעם האחרונה|Last shown)[:\s]+([^\n]+)/i);
-        if (lastShownMatch) {
-          details.lastSeenDate = lastShownMatch[1].trim();
-        }
-
-        // Extract format - "פורמט: תמונה" or "Format: Image"
-        const formatMatch = cleanText.match(/(?:פורמט|Format)[:\s]+([^\n]+)/i);
-        if (formatMatch) {
-          let format = formatMatch[1].trim();
-          // Translate Hebrew to English
-          if (format === 'תמונה') format = 'Image';
-          else if (format === 'טקסט') format = 'Text';
-          else if (format === 'סרטון' || format === 'וידאו') format = 'Video';
-          details.format = format;
-        }
-
-        // Extract shown in regions - "הופיעו ב: בכל מקום" or "Shown in: ..."
-        const shownInMatch = cleanText.match(/(?:הופיעו ב|Shown in)[:\s]+([^\n]+)/i);
-        if (shownInMatch) {
-          details.shownIn = shownInMatch[1].trim();
-        }
-
-        return details;
-      });
-
-      // Update data with ad details (translate Hebrew to English)
-      if (adDetails.lastSeenDate) {
-        data.lastSeenDate = translateToEnglish(adDetails.lastSeenDate);
-      }
-      if (adDetails.format && !data.adFormats.includes(adDetails.format)) {
-        data.adFormats.push(adDetails.format);
-      }
-      if (adDetails.shownIn) {
-        data.shownInRegions = translateToEnglish(adDetails.shownIn);
-      }
-    }
-
-    // Take a screenshot for debugging
     const screenshot = await page.screenshot({
       encoding: 'base64',
-      fullPage: false
+      fullPage: true
     });
     data.screenshot = screenshot;
+
+    // Group ads by unique advertiser ID to find all publishers for this domain
+    const publishersMap = {};
+    for (const ad of data.ads) {
+      const pubId = ad.advertiserId;
+      if (!pubId) continue;
+      if (!publishersMap[pubId]) {
+        publishersMap[pubId] = {
+          id: pubId,
+          name: ad.advertiserName || null,
+          verified: ad.verified || false,
+          location: null,
+          ads: [],
+          lastSeenDate: null,
+          adFormats: [],
+          shownInRegions: null
+        };
+      }
+      publishersMap[pubId].ads.push(ad);
+    }
+
+    let publishers = Object.values(publishersMap);
+
+    // Fallback: if no publisher IDs found in ads, use data.advertiser
+    if (publishers.length === 0 && data.advertiser?.id) {
+      publishers.push({
+        id: data.advertiser.id,
+        name: data.advertiser.name,
+        verified: false,
+        location: null,
+        ads: data.ads,
+        lastSeenDate: null,
+        adFormats: [],
+        shownInRegions: null
+      });
+    }
+
+    console.log(`Found ${publishers.length} unique publisher(s) for ${domain}`);
+
+    // For each unique publisher, fetch advertiser details and one creative's details
+    for (const pub of publishers) {
+      // Fetch advertiser detail page
+      try {
+        console.log(`Fetching advertiser details for: ${pub.id} (${pub.name || 'unknown'})`);
+        const advertiserUrl = `https://adstransparency.google.com/advertiser/${pub.id}?region=${region}`;
+
+        await page.goto(advertiserUrl, {
+          waitUntil: 'networkidle2',
+          timeout: timeout
+        });
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        const advertiserDetails = await page.evaluate(() => {
+          const text = document.body.innerText;
+          const cleanText = text.replace(/[\u200F\u200E]/g, '');
+
+          const details = {
+            location: null,
+            verified: false
+          };
+
+          const countryMatch = cleanText.match(/(?:מדינה|Country)[:\s]+([^\n]+)/i);
+          if (countryMatch) {
+            details.location = countryMatch[1].trim();
+          }
+
+          if (cleanText.includes('המפרסם אימת את הזהות') ||
+              cleanText.includes('verified') ||
+              cleanText.includes('מאומת')) {
+            details.verified = true;
+          }
+
+          return details;
+        });
+
+        if (advertiserDetails.location) pub.location = translateToEnglish(advertiserDetails.location);
+        if (advertiserDetails.verified) pub.verified = true;
+      } catch (err) {
+        console.error(`Error fetching advertiser details for ${pub.id}:`, err.message);
+      }
+
+      // Fetch creative detail page for the first ad of this publisher
+      const firstAd = pub.ads.find(a => a.creativeId);
+      if (firstAd) {
+        try {
+          console.log(`Fetching ad details for: ${firstAd.creativeId} (publisher: ${pub.id})`);
+          const creativeUrl = `https://adstransparency.google.com/advertiser/${pub.id}/creative/${firstAd.creativeId}?region=${region}`;
+
+          await page.goto(creativeUrl, {
+            waitUntil: 'networkidle2',
+            timeout: timeout
+          });
+          await new Promise(resolve => setTimeout(resolve, 2000));
+
+          const adDetails = await page.evaluate(() => {
+            const text = document.body.innerText;
+            const cleanText = text.replace(/[\u200F\u200E]/g, '');
+
+            const details = {
+              lastSeenDate: null,
+              format: null,
+              shownIn: null
+            };
+
+            const lastShownMatch = cleanText.match(/(?:הוצגה בפעם האחרונה|Last shown)[:\s]+([^\n]+)/i);
+            if (lastShownMatch) {
+              details.lastSeenDate = lastShownMatch[1].trim();
+            }
+
+            const formatMatch = cleanText.match(/(?:פורמט|Format)[:\s]+([^\n]+)/i);
+            if (formatMatch) {
+              let format = formatMatch[1].trim();
+              if (format === 'תמונה') format = 'Image';
+              else if (format === 'טקסט') format = 'Text';
+              else if (format === 'סרטון' || format === 'וידאו') format = 'Video';
+              details.format = format;
+            }
+
+            const shownInMatch = cleanText.match(/(?:הופיעו ב|Shown in)[:\s]+([^\n]+)/i);
+            if (shownInMatch) {
+              details.shownIn = shownInMatch[1].trim();
+            }
+
+            return details;
+          });
+
+          if (adDetails.lastSeenDate) pub.lastSeenDate = translateToEnglish(adDetails.lastSeenDate);
+          if (adDetails.format && !pub.adFormats.includes(adDetails.format)) {
+            pub.adFormats.push(adDetails.format);
+          }
+          if (adDetails.shownIn) pub.shownInRegions = translateToEnglish(adDetails.shownIn);
+        } catch (err) {
+          console.error(`Error fetching creative details for ${firstAd.creativeId}:`, err.message);
+        }
+      }
+
+      // Collect formats from this publisher's ads
+      const formats = new Set(pub.adFormats);
+      pub.ads.forEach(ad => { if (ad.format) formats.add(ad.format); });
+      pub.adFormats = Array.from(formats);
+    }
+
+    // Store publishers array in data
+    data.publishers = publishers;
+
+    // Keep backward compatibility - update data.advertiser and top-level fields from first publisher
+    if (publishers.length > 0) {
+      const firstPub = publishers[0];
+      data.advertiser = {
+        id: firstPub.id,
+        name: firstPub.name,
+        verified: firstPub.verified,
+        location: firstPub.location
+      };
+      data.lastSeenDate = firstPub.lastSeenDate;
+      data.shownInRegions = firstPub.shownInRegions;
+      const allFormats = new Set();
+      publishers.forEach(p => p.adFormats.forEach(f => allFormats.add(f)));
+      data.adFormats = Array.from(allFormats);
+    }
 
     return {
       success: true,

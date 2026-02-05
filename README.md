@@ -72,7 +72,7 @@ npm start
 
 ## How Each Parameter Is Found
 
-The scraper visits up to **3 pages** per domain to collect all parameters:
+The scraper visits up to **3 pages per publisher** found on a domain. If a domain has multiple publishers (different advertiser IDs), each gets its own row in Google Sheets with separate detail page visits.
 
 ### Page 1 — Domain Search Page
 
@@ -92,11 +92,10 @@ The scraper visits up to **3 pages** per domain to collect all parameters:
 
 `adstransparency.google.com/advertiser/{publisherId}`
 
-Only visited if a Publisher ID was found on Page 1.
+Only visited if a Publisher ID was found on Page 1. When multiple publishers are found for a domain, each publisher's detail page is visited separately.
 
 | Parameter | How it's extracted |
 |---|---|
-| **Legal Name** | Regex matching label `שם חוקי:` (Hebrew) or `Legal name:` followed by the value. |
 | **Location** | Regex matching `מדינה:` or `Country:` followed by the value. Translated from Hebrew to English via a lookup table in `scraper.js`. |
 | **Verified** | Checks page text for `המפרסם אימת את הזהות`, `verified`, or `מאומת`. |
 
@@ -104,22 +103,20 @@ Only visited if a Publisher ID was found on Page 1.
 
 `adstransparency.google.com/advertiser/{publisherId}/creative/{creativeId}`
 
-Only visited if both a Publisher ID and a Creative ID (from the first ad) were found.
+Visited for one ad per publisher, if both a Publisher ID and a Creative ID were found.
 
 | Parameter | How it's extracted |
 |---|---|
 | **Last Seen Date** | Regex matching `הוצגה בפעם האחרונה:` or `Last shown:` followed by the date. Hebrew month names translated to English. |
 | **Ad Format** | Regex matching `פורמט:` or `Format:` followed by the value. Hebrew (`תמונה`/`טקסט`/`סרטון`) translated to Image/Text/Video. |
-| **Shown In Regions** | Regex matching `הופיעו ב:` or `Shown in:` followed by the value. Hebrew region names translated to English. |
 
 ### Not Scraped (Input / Generated)
 
 | Parameter | Source |
 |---|---|
 | **Domain** | Input — from Google Sheet CONFIG tab, column A. |
-| **Region** | Input — defaults to `anywhere`. |
+| **Ads Transparency URL** | Generated — `https://adstransparency.google.com/?region=anywhere&domain={domain}` |
 | **Scan Date** | Generated at scan time, formatted in Israel timezone (IST/IDT). |
-| **Status** | `success` or `error` based on whether scraping succeeded. |
 
 ## API Endpoints
 

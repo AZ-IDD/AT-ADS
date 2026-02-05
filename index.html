@@ -700,6 +700,9 @@
     <header>
       <h1>Ads Transparency Scanner</h1>
       <p class="subtitle">Scan domains for Google Ads transparency data</p>
+      <div id="driveAuthBanner" class="config-warning" style="display: none; margin-top: 1rem;">
+        Google Drive not authorized. <a href="/auth" target="_blank">Click here to authorize</a> for screenshot uploads.
+      </div>
     </header>
 
     <div class="nav-tabs">
@@ -764,6 +767,7 @@
 
           <!-- Detailed Progress Panel -->
           <div id="progressPanel" class="progress-panel" style="display: none;">
+            <div id="timerDisplay" style="text-align:center;margin-bottom:1rem;font-size:1.75rem;font-weight:700;font-variant-numeric:tabular-nums;color:#3b82f6;letter-spacing:0.05em;">00:00:00</div>
             <div class="progress-section">
               <div class="progress-section-title">Scanning Domains</div>
               <div class="progress-bar">
@@ -831,6 +835,7 @@
                 <th>Publisher</th>
                 <th>Location</th>
                 <th>Total Ads</th>
+                <th>In View</th>
                 <th>Format</th>
                 <th>Last Seen</th>
                 <th>Scanned At</th>
@@ -974,9 +979,22 @@
       loadSettings();
       checkConfiguration();
       checkAutoRunStatus();
+      checkDriveAuth();
       // Poll auto-run status every 30 seconds
       setInterval(checkAutoRunStatus, 30000);
     });
+
+    // Check Google Drive authorization status
+    async function checkDriveAuth() {
+      try {
+        const resp = await fetch('/drive-status');
+        const data = await resp.json();
+        const banner = document.getElementById('driveAuthBanner');
+        banner.style.display = data.authenticated ? 'none' : 'block';
+      } catch (e) {
+        console.error('Failed to check Drive auth:', e);
+      }
+    }
 
     // Navigation
     function showPage(page) {
@@ -1120,6 +1138,31 @@
 
     // Scanning
     let scanStats = { success: 0, errors: 0 };
+    let timerInterval = null;
+
+    function startTimer() {
+      const timerEl = document.getElementById('timerDisplay');
+      const start = Date.now();
+      timerEl.style.color = '#3b82f6';
+      const pad = n => String(n).padStart(2, '0');
+      const tick = () => {
+        const elapsed = Math.floor((Date.now() - start) / 1000);
+        const h = Math.floor(elapsed / 3600);
+        const m = Math.floor((elapsed % 3600) / 60);
+        const s = elapsed % 60;
+        timerEl.textContent = `${pad(h)}:${pad(m)}:${pad(s)}`;
+      };
+      tick();
+      timerInterval = setInterval(tick, 1000);
+    }
+
+    function stopTimer() {
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+      }
+      document.getElementById('timerDisplay').style.color = '#22c55e';
+    }
 
     function setStatus(message, type = '') {
       const status = document.getElementById('status');
@@ -1177,13 +1220,11 @@
           publisherName: '-',
           publisherId: '-',
           creativeId: '-',
-          publisherLegalName: '-',
           publisherVerified: false,
           publisherLocation: '-',
           totalAds: '-',
           adFormats: [],
           lastSeenDate: '-',
-          shownInRegions: '-',
           scannedAt: '-',
           status: 'pending'
         });
@@ -1191,6 +1232,7 @@
 
       setStatus('Starting batch scan...', 'loading');
       updateProgress(0, totalDomains, '');
+      startTimer();
 
       // Process domains in batches: scan batchSize, send to sheets, repeat
       for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
@@ -1217,52 +1259,101 @@
 
             if (result.success && result.data) {
               const data = result.data;
-              const firstAd = data.ads?.[0];
-              const pubId = data.advertiser?.id;
-              const crId = firstAd?.creativeId;
-              let adMediaUrl = firstAd?.imageUrl || '-';
-              if (adMediaUrl === '-' && pubId && crId) {
-                adMediaUrl = `https://adstransparency.google.com/advertiser/${pubId}/creative/${crId}`;
-              }
-              const rowData = {
-                domain: domain,
-                publisherName: data.advertiser?.name || '-',
-                publisherId: pubId || '-',
-                creativeId: crId || '-',
-                publisherLegalName: data.advertiser?.legalName || '-',
-                publisherVerified: data.advertiser?.verified || false,
-                publisherLocation: data.advertiser?.location || '-',
-                totalAds: data.totalAds || 0,
-                region: data.region || 'anywhere',
-                adFormats: data.adFormats || [],
-                lastSeenDate: data.lastSeenDate || '-',
-                shownInRegions: data.shownInRegions || '-',
-                adImageUrl: adMediaUrl,
-                adText: data.ads?.[0]?.adText || '-',
-                scannedAt: formatIsraeliDate(new Date()),
-                status: 'success'
-              };
 
-              scanResults.push(rowData);
-              batchResults.push(rowData);
-              updateResultRow(domain, rowData);
-              scanStats.success++;
+              // Upload screenshot to Drive via Drive API
+              let screenshotDriveUrl = '-';
+              if (data.screenshot) {
+                try {
+                  const uploadResp = await fetch('/upload-screenshot', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      base64: data.screenshot,
+                      domain: domain
+                    })
+                  });
+                  const uploadData = await uploadResp.json();
+                  if (uploadData.success && uploadData.downloadUrl) {
+                    screenshotDriveUrl = uploadData.downloadUrl;
+                    console.log(`Screenshot uploaded for ${domain}: ${screenshotDriveUrl}`);
+                  }
+                } catch (uploadErr) {
+                  console.error(`Screenshot upload failed for ${domain}:`, uploadErr);
+                }
+              }
+
+              const publishers = data.publishers || [];
+              const adsInView = data.ads?.length || 0;
+
+              if (publishers.length > 0) {
+                // Create one row per unique publisher
+                const rows = [];
+                for (const pub of publishers) {
+                  const firstAd = pub.ads?.[0];
+                  const crId = firstAd?.creativeId;
+                  rows.push({
+                    domain: domain,
+                    publisherName: pub.name || '-',
+                    publisherId: pub.id || '-',
+                    creativeId: crId || '-',
+                    publisherVerified: pub.verified || false,
+                    publisherLocation: pub.location || '-',
+                    totalAds: data.totalAds || 0,
+                    adsInView: adsInView,
+                    adFormats: pub.adFormats || [],
+                    lastSeenDate: pub.lastSeenDate || '-',
+                    adImageUrl: screenshotDriveUrl,
+                    adText: firstAd?.adText?.replace(/מאומת/g, '').trim() || '-',
+                    adsTransparencyUrl: `https://adstransparency.google.com/?region=anywhere&domain=${domain}`,
+                    scannedAt: formatIsraeliDate(new Date()),
+                    status: 'success'
+                  });
+                }
+                replaceResultRows(domain, rows);
+                rows.forEach(r => { scanResults.push(r); batchResults.push(r); });
+                scanStats.success++;
+              } else {
+                // Fallback: single row
+                const firstAd = data.ads?.[0];
+                const pubId = data.advertiser?.id;
+                const crId = firstAd?.creativeId;
+                const rowData = {
+                  domain: domain,
+                  publisherName: data.advertiser?.name || '-',
+                  publisherId: pubId || '-',
+                  creativeId: crId || '-',
+                  publisherVerified: data.advertiser?.verified || false,
+                  publisherLocation: data.advertiser?.location || '-',
+                  totalAds: data.totalAds || 0,
+                  adsInView: adsInView,
+                  adFormats: data.adFormats || [],
+                  lastSeenDate: data.lastSeenDate || '-',
+                  adImageUrl: screenshotDriveUrl,
+                  adText: data.ads?.[0]?.adText || '-',
+                  adsTransparencyUrl: `https://adstransparency.google.com/?region=anywhere&domain=${domain}`,
+                  scannedAt: formatIsraeliDate(new Date()),
+                  status: 'success'
+                };
+                scanResults.push(rowData);
+                batchResults.push(rowData);
+                updateResultRow(domain, rowData);
+                scanStats.success++;
+              }
             } else {
               const rowData = {
                 domain: domain,
                 publisherName: '-',
                 publisherId: '-',
                 creativeId: '-',
-                publisherLegalName: '-',
                 publisherVerified: false,
                 publisherLocation: '-',
                 totalAds: 0,
-                region: 'anywhere',
+                adsInView: 0,
                 adFormats: [],
                 lastSeenDate: '-',
-                shownInRegions: '-',
                 adImageUrl: '-',
                 adText: '-',
+                adsTransparencyUrl: `https://adstransparency.google.com/?region=anywhere&domain=${domain}`,
                 scannedAt: formatIsraeliDate(new Date()),
                 status: 'error',
                 error: result.error
@@ -1279,16 +1370,15 @@
               publisherName: '-',
               publisherId: '-',
               creativeId: '-',
-              publisherLegalName: '-',
               publisherVerified: false,
               publisherLocation: '-',
               totalAds: 0,
-              region: 'anywhere',
+              adsInView: 0,
               adFormats: [],
               lastSeenDate: '-',
-              shownInRegions: '-',
               adImageUrl: '-',
               adText: '-',
+              adsTransparencyUrl: `https://adstransparency.google.com/?region=anywhere&domain=${domain}`,
               scannedAt: formatIsraeliDate(new Date()),
               status: 'error',
               error: error.message
@@ -1332,6 +1422,7 @@
       }
 
       // Final updates
+      stopTimer();
       updateProgress(totalDomains, totalDomains, '');
       document.getElementById('currentDomain').textContent = 'Done!';
       updateSheetsProgress(totalBatches, totalBatches, sheetsStats.saved, sheetsStats.failed);
@@ -1369,6 +1460,34 @@
       }
     }
 
+    function replaceResultRows(domain, rows) {
+      const rowId = 'row-' + domain.replace(/\./g, '-');
+      const existingRow = document.getElementById(rowId);
+      const tbody = document.getElementById('resultsBody');
+
+      if (rows.length === 1) {
+        // Single publisher - simple update
+        if (existingRow) {
+          existingRow.innerHTML = getRowHtml(rows[0]);
+        }
+      } else {
+        // Multiple publishers - remove old row, add multiple new rows
+        const insertBefore = existingRow ? existingRow.nextSibling : null;
+        if (existingRow) existingRow.remove();
+
+        rows.forEach((rowData, i) => {
+          const tr = document.createElement('tr');
+          tr.id = rowId + '-pub-' + i;
+          tr.innerHTML = getRowHtml(rowData);
+          if (insertBefore) {
+            tbody.insertBefore(tr, insertBefore);
+          } else {
+            tbody.appendChild(tr);
+          }
+        });
+      }
+    }
+
     function getRowHtml(data) {
       const adsClass = data.totalAds === 0 || data.totalAds === '-' ? 'zero' : '';
       const statusClass = data.status;
@@ -1378,11 +1497,14 @@
       const formats = Array.isArray(data.adFormats) ? data.adFormats.join(', ') : (data.adFormats || '-');
       const verifiedBadge = data.publisherVerified ? ' <span style="color: #22c55e;">✓</span>' : '';
 
+      const inView = data.adsInView !== undefined ? data.adsInView : '-';
+
       return `
         <td class="domain">${data.domain}</td>
         <td class="publisher">${data.publisherName}${verifiedBadge}</td>
         <td>${data.publisherLocation || '-'}</td>
         <td class="ads-count ${adsClass}">${data.totalAds}</td>
+        <td style="color: #94a3b8;">${inView}</td>
         <td>${formats}</td>
         <td style="font-size: 0.85rem;">${data.lastSeenDate || '-'}</td>
         <td class="timestamp">${data.scannedAt}</td>
@@ -1394,11 +1516,18 @@
     }
 
     function updateSummaryStats(duration) {
-      const totalDomains = scanResults.length;
-      const totalAds = scanResults.reduce((sum, r) => sum + (parseInt(r.totalAds) || 0), 0);
-      const withAds = scanResults.filter(r => r.totalAds > 0).length;
+      // Count unique domains (a domain may have multiple publisher rows)
+      const uniqueDomains = [...new Set(scanResults.map(r => r.domain))];
+      const totalAds = uniqueDomains.reduce((sum, domain) => {
+        const first = scanResults.find(r => r.domain === domain);
+        return sum + (parseInt(first?.totalAds) || 0);
+      }, 0);
+      const withAds = uniqueDomains.filter(domain => {
+        const first = scanResults.find(r => r.domain === domain);
+        return (parseInt(first?.totalAds) || 0) > 0;
+      }).length;
 
-      document.getElementById('statDomains').textContent = totalDomains;
+      document.getElementById('statDomains').textContent = uniqueDomains.length;
       document.getElementById('statTotalAds').textContent = totalAds.toLocaleString();
       document.getElementById('statWithAds').textContent = withAds;
       document.getElementById('statScanTime').textContent = duration + 's';
@@ -1419,18 +1548,16 @@
         publisherName: r.publisherName,
         publisherId: r.publisherId,
         creativeId: r.creativeId,
-        publisherLegalName: r.publisherLegalName,
         publisherVerified: r.publisherVerified,
         publisherLocation: r.publisherLocation,
         totalAds: r.totalAds,
-        region: r.region,
+        adsInView: r.adsInView || 0,
         adFormats: r.adFormats,
         lastSeenDate: r.lastSeenDate,
-        shownInRegions: r.shownInRegions,
         adImageUrl: r.adImageUrl,
         adText: r.adText ? r.adText.replace(/מאומת/g, '').trim() : r.adText,
-        scanDate: r.scannedAt,
-        status: r.status
+        adsTransparencyUrl: r.adsTransparencyUrl,
+        scanDate: r.scannedAt
       }));
 
       try {

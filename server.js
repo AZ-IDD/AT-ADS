@@ -6,6 +6,7 @@
 const express = require('express');
 const path = require('path');
 const { scrapeAdTransparency } = require('./scraper');
+const { getAuthUrl, handleAuthCallback, isAuthenticated, uploadToDrive } = require('./drive-uploader');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -47,7 +48,7 @@ function formatIsraeliDate(date) {
 }
 
 // Middleware
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 
 // Serve static files (HTML, screenshots, JSON results)
 app.use(express.static(path.join(__dirname)));
@@ -55,6 +56,42 @@ app.use(express.static(path.join(__dirname)));
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+/**
+ * GET /auth
+ * Redirect to Google OAuth2 consent screen for Drive access
+ */
+app.get('/auth', (req, res) => {
+  const authUrl = getAuthUrl();
+  res.redirect(authUrl);
+});
+
+/**
+ * GET /auth/callback
+ * Handle OAuth2 callback from Google
+ */
+app.get('/auth/callback', async (req, res) => {
+  const { code } = req.query;
+  if (!code) {
+    return res.status(400).send('Missing authorization code');
+  }
+
+  try {
+    await handleAuthCallback(code);
+    res.send('<html><body style="font-family:sans-serif;text-align:center;padding:3rem;background:#0f172a;color:#e2e8f0;"><h1 style="color:#22c55e;">Google Drive Authorized!</h1><p>You can close this tab and return to the scanner.</p><script>setTimeout(()=>window.close(),3000)</script></body></html>');
+  } catch (error) {
+    console.error('Auth callback error:', error.message);
+    res.status(500).send('Authorization failed: ' + error.message);
+  }
+});
+
+/**
+ * GET /drive-status
+ * Check if Google Drive API is authenticated
+ */
+app.get('/drive-status', (req, res) => {
+  res.json({ authenticated: isAuthenticated() });
 });
 
 /**
@@ -203,11 +240,6 @@ app.get('/scrape', async (req, res) => {
   try {
     const result = await scrapeAdTransparency(domain, { region });
 
-    // Remove screenshot from response to reduce payload (optional)
-    if (result.data?.screenshot) {
-      delete result.data.screenshot;
-    }
-
     res.json(result);
   } catch (error) {
     console.error('Error:', error);
@@ -248,11 +280,6 @@ app.post('/scrape-batch', async (req, res) => {
     console.log(`  Processing: ${domain}`);
     const result = await scrapeAdTransparency(domain, { region });
 
-    // Remove screenshot to reduce payload
-    if (result.data?.screenshot) {
-      delete result.data.screenshot;
-    }
-
     results.push({
       domain,
       ...result
@@ -268,6 +295,37 @@ app.post('/scrape-batch', async (req, res) => {
     results: results
   });
 });
+
+/**
+ * POST /upload-screenshot
+ * Upload a screenshot to Google Drive via Drive API
+ * Body: { base64, domain }
+ */
+app.post('/upload-screenshot', async (req, res) => {
+  const { base64, domain } = req.body;
+
+  if (!base64) {
+    return res.status(400).json({ success: false, error: 'Missing base64 data' });
+  }
+
+  try {
+    const result = await uploadScreenshotToDriveAPI(base64, domain);
+    res.json(result);
+  } catch (error) {
+    console.error('Screenshot upload error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * Upload screenshot to Drive via Google Drive API
+ */
+async function uploadScreenshotToDriveAPI(base64, domain) {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+  const filename = `screenshot_${(domain || 'unknown').replace(/\./g, '_')}_${timestamp}.png`;
+
+  return await uploadToDrive(base64, filename, 'image/png');
+}
 
 /**
  * Auto-run scheduler functions
@@ -370,42 +428,88 @@ async function runScheduledScan() {
         const result = await scrapeAdTransparency(domain, { region: 'anywhere' });
 
         if (result.success && result.data) {
-          const rawAdText = result.data.ads?.[0]?.adText || '-';
-          const cleanAdText = rawAdText !== '-' ? rawAdText.replace(/מאומת/g, '').trim() : '-';
-          const firstAd = result.data.ads?.[0];
-          const pubId = result.data.advertiser?.id;
-          const crId = firstAd?.creativeId;
-          let adMediaUrl = firstAd?.imageUrl || '-';
-          if (adMediaUrl === '-' && pubId && crId) {
-            adMediaUrl = `https://adstransparency.google.com/advertiser/${pubId}/creative/${crId}`;
+          // Upload screenshot to Drive via Drive API
+          let screenshotDriveUrl = '-';
+          if (result.data.screenshot && isAuthenticated()) {
+            console.log(`[Auto-Run]   Uploading screenshot for ${domain} to Drive...`);
+            try {
+              const uploadResult = await uploadScreenshotToDriveAPI(result.data.screenshot, domain);
+              if (uploadResult.success && uploadResult.downloadUrl) {
+                screenshotDriveUrl = uploadResult.downloadUrl;
+                console.log(`[Auto-Run]   Screenshot uploaded: ${screenshotDriveUrl}`);
+              }
+            } catch (uploadErr) {
+              console.error(`[Auto-Run]   Screenshot upload failed: ${uploadErr.message}`);
+            }
+            // Free memory
+            delete result.data.screenshot;
           }
-          const row = {
-            domain,
-            publisherName: result.data.advertiser?.name || '-',
-            publisherId: pubId || '-',
-            creativeId: crId || '-',
-            publisherLegalName: result.data.advertiser?.legalName || '-',
-            publisherVerified: result.data.advertiser?.verified || false,
-            publisherLocation: result.data.advertiser?.location || '-',
-            totalAds: result.data.totalAds || 0,
-            region: result.data.region || 'anywhere',
-            adFormats: result.data.adFormats || [],
-            lastSeenDate: result.data.lastSeenDate || '-',
-            shownInRegions: result.data.shownInRegions || '-',
-            adImageUrl: adMediaUrl,
-            adText: cleanAdText,
-            scanDate: formatIsraeliDate(new Date()),
-            status: 'success'
-          };
-          batchResults.push(row);
-          allResults.push(row);
+
+          const publishers = result.data.publishers || [];
+          const adsInView = result.data.ads?.length || 0;
+
+          if (publishers.length > 0) {
+            // Create one row per unique publisher
+            for (const pub of publishers) {
+              const firstAd = pub.ads?.[0];
+              const crId = firstAd?.creativeId;
+              const rawAdText = firstAd?.adText || '-';
+              const cleanAdText = rawAdText !== '-' ? rawAdText.replace(/מאומת/g, '').trim() : '-';
+              const row = {
+                domain,
+                publisherName: pub.name || '-',
+                publisherId: pub.id || '-',
+                creativeId: crId || '-',
+                publisherVerified: pub.verified || false,
+                publisherLocation: pub.location || '-',
+                totalAds: result.data.totalAds || 0,
+                adsInView: adsInView,
+                adFormats: pub.adFormats || [],
+                lastSeenDate: pub.lastSeenDate || '-',
+                adImageUrl: screenshotDriveUrl,
+                adText: cleanAdText,
+                adsTransparencyUrl: `https://adstransparency.google.com/?region=anywhere&domain=${domain}`,
+                scanDate: formatIsraeliDate(new Date()),
+                status: 'success'
+              };
+              batchResults.push(row);
+              allResults.push(row);
+            }
+          } else {
+            // Fallback: single row (no publishers found)
+            const rawAdText = result.data.ads?.[0]?.adText || '-';
+            const cleanAdText = rawAdText !== '-' ? rawAdText.replace(/מאומת/g, '').trim() : '-';
+            const firstAd = result.data.ads?.[0];
+            const pubId = result.data.advertiser?.id;
+            const crId = firstAd?.creativeId;
+            const row = {
+              domain,
+              publisherName: result.data.advertiser?.name || '-',
+              publisherId: pubId || '-',
+              creativeId: crId || '-',
+              publisherVerified: result.data.advertiser?.verified || false,
+              publisherLocation: result.data.advertiser?.location || '-',
+              totalAds: result.data.totalAds || 0,
+              adsInView: adsInView,
+              adFormats: result.data.adFormats || [],
+              lastSeenDate: result.data.lastSeenDate || '-',
+              adImageUrl: screenshotDriveUrl,
+              adText: cleanAdText,
+              adsTransparencyUrl: `https://adstransparency.google.com/?region=anywhere&domain=${domain}`,
+              scanDate: formatIsraeliDate(new Date()),
+              status: 'success'
+            };
+            batchResults.push(row);
+            allResults.push(row);
+          }
         } else {
           const row = {
             domain,
-            publisherName: '-', publisherId: '-', creativeId: '-', publisherLegalName: '-',
+            publisherName: '-', publisherId: '-', creativeId: '-',
             publisherVerified: false, publisherLocation: '-',
-            totalAds: 0, region: 'anywhere', adFormats: [],
-            lastSeenDate: '-', shownInRegions: '-', adImageUrl: '-', adText: '-',
+            totalAds: 0, adsInView: 0, adFormats: [],
+            lastSeenDate: '-', adImageUrl: '-', adText: '-',
+            adsTransparencyUrl: `https://adstransparency.google.com/?region=anywhere&domain=${domain}`,
             scanDate: formatIsraeliDate(new Date()),
             status: 'error', error: result.error
           };
@@ -415,10 +519,11 @@ async function runScheduledScan() {
       } catch (error) {
         const row = {
           domain,
-          publisherName: '-', publisherId: '-', creativeId: '-', publisherLegalName: '-',
+          publisherName: '-', publisherId: '-', creativeId: '-',
           publisherVerified: false, publisherLocation: '-',
-          totalAds: 0, region: 'anywhere', adFormats: [],
-          lastSeenDate: '-', shownInRegions: '-', adImageUrl: '-', adText: '-',
+          totalAds: 0, adsInView: 0, adFormats: [],
+          lastSeenDate: '-', adImageUrl: '-', adText: '-',
+          adsTransparencyUrl: `https://adstransparency.google.com/?region=anywhere&domain=${domain}`,
           scanDate: formatIsraeliDate(new Date()),
           status: 'error', error: error.message
         };
@@ -587,11 +692,16 @@ app.listen(PORT, () => {
   console.log('');
   console.log('Endpoints:');
   console.log(`  GET  /health`);
+  console.log(`  GET  /auth                  — Authorize Google Drive`);
+  console.log(`  GET  /drive-status          — Check Drive auth status`);
   console.log(`  GET  /scrape?domain=example.com`);
   console.log(`  POST /scrape-batch  { domains: [...] }`);
+  console.log(`  POST /upload-screenshot  { base64, domain }`);
   console.log(`  GET  /auto-run/status`);
   console.log(`  POST /auto-run/start  { intervalMinutes, appsScriptUrl, domains }`);
   console.log(`  POST /auto-run/stop`);
   console.log(`  GET  /auto-run/results`);
+  console.log('');
+  console.log(`Drive Auth: ${isAuthenticated() ? 'Authenticated' : 'Not authenticated — visit http://localhost:${PORT}/auth'}`);
   console.log('='.repeat(50));
 });
